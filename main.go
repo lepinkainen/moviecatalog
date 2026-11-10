@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,16 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// defaultModel is used when OPENAI_MODEL is unset.
+const defaultModel = "gpt-6.1-sol"
+
+// modelPrices is LiteLLM's model price list, used for cost estimates. It is
+// updated by hand from
+// https://raw.githubusercontent.com/BerriAI/litellm/refs/heads/main/model_prices_and_context_window.json
+//
+//go:embed model_prices_and_context_window.json
+var modelPrices []byte
 
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -51,17 +62,32 @@ func run(log *slog.Logger) error {
 	srv := server.New(store, dataDir, webui.FS(), log)
 
 	openAIKey, tmdbKey := os.Getenv("OPENAI_API_KEY"), os.Getenv("TMDB_API_KEY")
-	if openAIKey != "" && tmdbKey != "" {
+	var tmdb *identify.TMDB
+	if tmdbKey != "" {
+		tmdb = &identify.TMDB{APIKey: tmdbKey, HTTP: &http.Client{Timeout: 30 * time.Second}}
+		srv.SetTMDB(tmdb)
+	}
+	if openAIKey != "" && tmdb != nil {
 		llm := &identify.OpenAI{
 			APIKey: openAIKey,
-			Model:  envOr("OPENAI_MODEL", "gpt-6-astra"),
+			Model:  envOr("OPENAI_MODEL", defaultModel),
 			HTTP:   &http.Client{Timeout: 5 * time.Minute},
 		}
-		tmdb := &identify.TMDB{APIKey: tmdbKey, HTTP: &http.Client{Timeout: 30 * time.Second}}
+		price, err := identify.LookupPrice(modelPrices, llm.Model)
+		if err != nil {
+			return err
+		}
+		llm.Price = price
 		worker := identify.NewWorker(store, dataDir, llm, tmdb, log)
 		srv.OnPending(worker.Notify)
 		go worker.Run(ctx)
-		log.Info("identification enabled", "model", llm.Model)
+		if price != nil {
+			log.Info("identification enabled", "model", llm.Model,
+				"usd_per_1m_input", price.Input*1e6, "usd_per_1m_output", price.Output*1e6)
+		} else {
+			log.Warn("identification enabled, but the model is not in the price list; costs will not be estimated",
+				"model", llm.Model)
+		}
 	} else {
 		log.Warn("identification disabled: set OPENAI_API_KEY and TMDB_API_KEY to enable it; captures are still stored")
 	}

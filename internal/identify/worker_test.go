@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,6 +35,11 @@ type fakes struct {
 	picks int
 	// results maps "<media type>|<query>|<year or empty>" to TMDB results.
 	results map[string][]map[string]any
+	// identifies counts the identification requests; onIdentify runs during each one.
+	identifies int
+	onIdentify func()
+	// tmdbStatus makes TMDB searches fail with this HTTP status when set.
+	tmdbStatus int
 }
 
 func (f *fakes) handler() http.Handler {
@@ -52,6 +58,10 @@ func (f *fakes) handler() http.Handler {
 		var answer any
 		switch req.Text.Format.Name {
 		case "identification":
+			f.identifies++
+			if f.onIdentify != nil {
+				f.onIdentify()
+			}
 			if f.guessStatus != 0 {
 				http.Error(w, `{"error":"boom"}`, f.guessStatus)
 				return
@@ -72,9 +82,17 @@ func (f *fakes) handler() http.Handler {
 					map[string]any{"type": "output_text", "text": string(text)},
 				}},
 			},
+			"usage": map[string]any{
+				"input_tokens": 1000, "output_tokens": 200,
+				"input_tokens_details": map[string]any{"cached_tokens": 400},
+			},
 		})
 	})
 	mux.HandleFunc("GET /search/{kind}", func(w http.ResponseWriter, r *http.Request) {
+		if f.tmdbStatus != 0 {
+			http.Error(w, `{"status_message":"boom"}`, f.tmdbStatus)
+			return
+		}
 		q := r.URL.Query()
 		year := q.Get("year") + q.Get("first_air_date_year")
 		key := r.PathValue("kind") + "|" + q.Get("query") + "|" + year
@@ -263,6 +281,72 @@ func TestIdentifyAmbiguousMatchAsksLLM(t *testing.T) {
 	}
 }
 
+func TestIdentifyRecordsTokenUsageAndCost(t *testing.T) {
+	fx := newFixture(t)
+	fx.worker.llm.Price = &Price{Input: 2e-6, CachedInput: 0.5e-6, Output: 10e-6}
+	id := fx.capture(t, nil)
+	fx.fakes.guess = movieGuess("Hamlet", 1990)
+	fx.fakes.results["movie|Hamlet|1990"] = []map[string]any{
+		result(1, "Hamlet", "1990-12-19"), result(2, "Hamlet", "1991-02-01"),
+	}
+	pick := int64(2)
+	fx.fakes.pick = &pick
+
+	if err := fx.process(t); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := fx.store.ListRuns(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 600 uncached × $2 + 400 cached × $0.5 + 200 out × $10, per million tokens.
+	const perCall = 0.0034
+	priced := 0
+	for _, r := range runs {
+		switch r.Step {
+		case "barcode":
+			if r.InputTokens != nil || r.CostUSD != nil {
+				t.Errorf("barcode run has usage: %+v", r)
+			}
+		case "llm", "tmdb":
+			if r.InputTokens == nil || *r.InputTokens != 1000 || *r.OutputTokens != 200 {
+				t.Errorf("%s run tokens = %v/%v, want 1000/200", r.Step, r.InputTokens, r.OutputTokens)
+			}
+			if r.CostUSD == nil || math.Abs(*r.CostUSD-perCall) > 1e-9 {
+				t.Errorf("%s run cost = %v, want %v", r.Step, r.CostUSD, perCall)
+			}
+			priced++
+		}
+	}
+	if priced != 2 {
+		t.Errorf("priced runs = %d, want the vision call and the pick", priced)
+	}
+	total, err := fx.store.RunsCost(context.Background(), id)
+	if err != nil || math.Abs(total-2*perCall) > 1e-9 {
+		t.Errorf("RunsCost = %v, %v; want %v", total, err, 2*perCall)
+	}
+}
+
+func TestIdentifyWithoutPriceRecordsTokensOnly(t *testing.T) {
+	fx := newFixture(t)
+	id := fx.capture(t, nil)
+	fx.fakes.guess = movieGuess("Heat", 1995)
+	fx.fakes.results["movie|Heat|1995"] = []map[string]any{result(949, "Heat", "1995-12-15")}
+
+	if err := fx.process(t); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := fx.store.ListRuns(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if r.Step == "llm" && (r.InputTokens == nil || r.CostUSD != nil) {
+			t.Errorf("llm run tokens = %v, cost = %v; want tokens and no cost", r.InputTokens, r.CostUSD)
+		}
+	}
+}
+
 func TestIdentifySeriesKeepsSeasonsInNotes(t *testing.T) {
 	fx := newFixture(t)
 	id := fx.capture(t, nil)
@@ -340,6 +424,14 @@ func TestIdentifyNeedsReview(t *testing.T) {
 		if item.Status != db.StatusNeedsReview || deref(item.ReviewReason) != want {
 			t.Errorf("second copy: status %q reason %q; want needs_review, %q", item.Status, deref(item.ReviewReason), want)
 		}
+		// "Keep both": approving the second copy clears the flag.
+		if err := fx.store.ApplyReview(context.Background(), second, db.ItemEdit{}); err != nil {
+			t.Fatal(err)
+		}
+		if item := fx.item(t, second); item.Status != db.StatusIdentified || item.ReviewReason != nil || len(item.Titles) != 1 {
+			t.Errorf("after approval: status %q reason %q titles %d; want identified with its title kept",
+				item.Status, deref(item.ReviewReason), len(item.Titles))
+		}
 		// The same movie in another format is not a duplicate.
 		if item := fx.item(t, dvd); item.Status != db.StatusIdentified {
 			t.Errorf("DVD copy status = %q (%s), want identified", item.Status, deref(item.ReviewReason))
@@ -350,7 +442,7 @@ func TestIdentifyNeedsReview(t *testing.T) {
 func TestIdentifyFailureRetriesThenGoesToReview(t *testing.T) {
 	fx := newFixture(t)
 	id := fx.capture(t, nil)
-	fx.fakes.guessStatus = http.StatusInternalServerError
+	fx.fakes.guessStatus = http.StatusBadRequest
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if err := fx.process(t); err == nil {
@@ -381,5 +473,98 @@ func TestIdentifyFailureRetriesThenGoesToReview(t *testing.T) {
 	}
 	if item := fx.item(t, id); item.Status != db.StatusIdentified || item.ReviewReason != nil {
 		t.Errorf("after retry: status %q reason %q; want identified", item.Status, deref(item.ReviewReason))
+	}
+}
+
+func TestIdentifyOutageDoesNotUseUpAttempts(t *testing.T) {
+	fx := newFixture(t)
+	id := fx.capture(t, nil)
+	fx.fakes.guessStatus = http.StatusServiceUnavailable
+
+	for range maxAttempts + 1 {
+		if err := fx.process(t); err == nil {
+			t.Fatal("expected an error")
+		}
+	}
+	if item := fx.item(t, id); item.Status != db.StatusCaptured {
+		t.Errorf("status = %q (%s), want still captured after an outage", item.Status, deref(item.ReviewReason))
+	}
+}
+
+func TestIdentifyRetryReusesPhotoReading(t *testing.T) {
+	fx := newFixture(t)
+	id := fx.capture(t, nil)
+	fx.fakes.guess = movieGuess("Serenity", 2005)
+	fx.fakes.results["movie|Serenity|2005"] = []map[string]any{result(16320, "Serenity", "2005-09-25")}
+	fx.fakes.tmdbStatus = http.StatusBadGateway
+
+	if err := fx.process(t); err == nil {
+		t.Fatal("expected the TMDB failure")
+	}
+	fx.fakes.tmdbStatus = 0
+	if err := fx.process(t); err != nil {
+		t.Fatal(err)
+	}
+	if fx.fakes.identifies != 1 {
+		t.Errorf("covers were read %d times, want once", fx.fakes.identifies)
+	}
+	if item := fx.item(t, id); item.Status != db.StatusIdentified {
+		t.Errorf("status = %q, want identified", item.Status)
+	}
+
+	// Re-queueing by hand reads the covers afresh.
+	if err := fx.store.ResetForIdentification(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.process(t); err != nil {
+		t.Fatal(err)
+	}
+	if fx.fakes.identifies != 2 {
+		t.Errorf("covers were read %d times after re-queueing, want twice", fx.fakes.identifies)
+	}
+}
+
+func TestIdentifyDoesNotOverwriteManualCorrection(t *testing.T) {
+	fx := newFixture(t)
+	id := fx.capture(t, nil)
+	fx.fakes.guess = movieGuess("Serenity", 2005)
+	fx.fakes.results["movie|Serenity|2005"] = []map[string]any{result(16320, "Serenity", "2005-09-25")}
+	format, notes := "DVD", "corrected by hand"
+	titles := []db.TitleInput{{MediaType: db.MediaMovie, Title: "Firefly"}}
+	// The correction is saved while the worker waits for the LLM.
+	fx.fakes.onIdentify = func() {
+		edit := db.ItemEdit{Format: &format, Notes: &notes, Titles: &titles}
+		if err := fx.store.ApplyReview(context.Background(), id, edit); err != nil {
+			t.Error(err)
+		}
+	}
+
+	if err := fx.process(t); err != nil {
+		t.Fatal(err)
+	}
+	item := fx.item(t, id)
+	if item.Status != db.StatusIdentified || deref(item.Format) != "DVD" || item.Notes != notes ||
+		len(item.Titles) != 1 || item.Titles[0].Title != "Firefly" {
+		t.Errorf("item = status %q format %q notes %q titles %+v; want the manual correction kept",
+			item.Status, deref(item.Format), item.Notes, item.Titles)
+	}
+}
+
+func TestIdentifyUnreadablePhotoGoesStraightToReview(t *testing.T) {
+	fx := newFixture(t)
+	id := fx.capture(t, nil)
+	item := fx.item(t, id)
+	if err := os.WriteFile(filepath.Join(fx.dir, item.Images[1].Path), []byte("\xff\xd8broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fx.process(t); err == nil {
+		t.Fatal("expected an error")
+	}
+	if item := fx.item(t, id); item.Status != db.StatusNeedsReview {
+		t.Errorf("status = %q, want needs_review after one attempt", item.Status)
+	}
+	if fx.fakes.identifies != 0 {
+		t.Errorf("LLM was asked about an unreadable photo")
 	}
 }

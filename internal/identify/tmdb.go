@@ -53,15 +53,19 @@ func (t *TMDB) Search(ctx context.Context, mediaType, query string, year *int) (
 	resp, err := t.HTTP.Do(req)
 	if err != nil {
 		// The URL in a transport error would include the API key.
-		return nil, fmt.Errorf("tmdb search %q: request failed", query)
+		return nil, transient(fmt.Errorf("tmdb search %q: request failed", query))
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("tmdb search %q: %w", query, err)
+		return nil, transient(fmt.Errorf("tmdb search %q: %w", query, err))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tmdb search %q: %s: %s", query, resp.Status, truncate(string(body), 200))
+		err := fmt.Errorf("tmdb search %q: %s: %s", query, resp.Status, truncate(string(body), 200))
+		if transientStatus(resp.StatusCode) {
+			err = transient(err)
+		}
+		return nil, err
 	}
 
 	var parsed struct {

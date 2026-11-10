@@ -46,8 +46,10 @@ type Item struct {
 	Confidence *string `json:"confidence"`
 	// ReviewReason says why a needs_review item needs a human.
 	ReviewReason *string `json:"review_reason"`
-	Images       []Image `json:"images"`
-	Titles       []Title `json:"titles"`
+	// Revision changes with every manual change; see SaveIdentification.
+	Revision int64   `json:"-"`
+	Images   []Image `json:"images"`
+	Titles   []Title `json:"titles"`
 }
 
 // Title is a movie or series contained in an item.
@@ -117,12 +119,13 @@ func (s *Store) CreateItem(ctx context.Context, now time.Time, save func(itemID 
 	return s.GetItem(ctx, id)
 }
 
-const itemColumns = `id, captured_at, status, format, barcode, notes, confidence, review_reason`
+const itemColumns = `id, captured_at, status, format, barcode, notes, confidence, review_reason, revision`
 
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var it Item
 	var capturedAt string
-	if err := row.Scan(&it.ID, &capturedAt, &it.Status, &it.Format, &it.Barcode, &it.Notes, &it.Confidence, &it.ReviewReason); err != nil {
+	if err := row.Scan(&it.ID, &capturedAt, &it.Status, &it.Format, &it.Barcode, &it.Notes, &it.Confidence,
+		&it.ReviewReason, &it.Revision); err != nil {
 		return nil, err
 	}
 	t, err := time.Parse(time.RFC3339, capturedAt)

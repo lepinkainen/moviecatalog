@@ -17,6 +17,7 @@ type OpenAI struct {
 	Model   string
 	BaseURL string // defaults to https://api.openai.com/v1
 	HTTP    *http.Client
+	Price   *Price // list price of Model, for cost estimates; nil when unknown
 }
 
 // Guess is what the LLM read off the covers.
@@ -151,16 +152,20 @@ func (c *OpenAI) respond(ctx context.Context, instructions string, content []obj
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("openai request: %w", err)
+		return "", transient(fmt.Errorf("openai request: %w", err))
 	}
 	defer resp.Body.Close()
 	rawBytes, err := io.ReadAll(resp.Body)
 	raw := string(rawBytes)
 	if err != nil {
-		return raw, fmt.Errorf("openai response: %w", err)
+		return raw, transient(fmt.Errorf("openai response: %w", err))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return raw, fmt.Errorf("openai: %s: %s", resp.Status, truncate(raw, 300))
+		err := fmt.Errorf("openai: %s: %s", resp.Status, truncate(raw, 300))
+		if transientStatus(resp.StatusCode) {
+			err = transient(err)
+		}
+		return raw, err
 	}
 
 	var parsed struct {

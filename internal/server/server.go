@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
+	"github.com/lepinkainen/moviecatalog/internal/identify"
+	"github.com/lepinkainen/moviecatalog/internal/photo"
 )
 
 // maxUploadBytes caps one capture request (front + back photo).
@@ -36,6 +38,8 @@ type Server struct {
 	log     *slog.Logger
 	// notify is called when items are waiting for identification.
 	notify func()
+	// tmdb backs the manual title search; nil when no API key is configured.
+	tmdb *identify.TMDB
 }
 
 // OnPending registers fn to be called whenever items are waiting for identification.
@@ -63,7 +67,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/items", s.handleCreateItem)
 	mux.HandleFunc("GET /api/items", s.handleListItems)
 	mux.HandleFunc("GET /api/items/{id}", s.handleGetItem)
+	mux.HandleFunc("PATCH /api/items/{id}", s.handleUpdateItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
+	mux.HandleFunc("GET /api/tmdb/search", s.handleTMDBSearch)
 	mux.HandleFunc("POST /api/items/{id}/identify", s.handleIdentifyItem)
 	mux.HandleFunc("GET /api/items/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/images/{id}", s.handleImage)
@@ -191,6 +197,12 @@ func saveUpload(r *http.Request, kind, dir, relDir string) (db.NewImage, error) 
 	}
 	if err := out.Close(); err != nil {
 		return db.NewImage{}, fmt.Errorf("save %s photo: %w", kind, err)
+	}
+	// The signature alone lets through truncated or corrupt files, which would
+	// only fail later in thumbnails and identification. The original bytes are kept.
+	if _, err := photo.Load(filepath.Join(dir, name)); err != nil {
+		return db.NewImage{}, &uploadError{http.StatusUnprocessableEntity,
+			kind + " photo could not be read as an image; please take it again"}
 	}
 	return db.NewImage{Kind: kind, Path: filepath.Join(relDir, name), ContentType: contentType}, nil
 }

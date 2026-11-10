@@ -160,6 +160,8 @@ func TestCaptureRejectsBadUploads(t *testing.T) {
 	}{
 		{"missing back", map[string][]byte{"front": jpegBytes}, http.StatusBadRequest},
 		{"not an image", map[string][]byte{"front": jpegBytes, "back": []byte("hello")}, http.StatusUnsupportedMediaType},
+		{"truncated image", map[string][]byte{"front": jpegBytes[:len(jpegBytes)/2], "back": pngBytes},
+			http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,5 +263,65 @@ func TestRunsEndpoint(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "[]" {
 		t.Errorf("runs of a fresh item = %d %q, want 200 []", resp.StatusCode, body)
+	}
+}
+
+func patchItem(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPatch, url, strings.NewReader(body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func TestManualCorrection(t *testing.T) {
+	ts, _ := newTestServer(t)
+	postCapture(t, ts.URL, map[string][]byte{"front": jpegBytes, "back": pngBytes})
+	itemURL := ts.URL + "/api/items/1"
+
+	// A box set: one TMDB title and one typed by hand.
+	resp := patchItem(t, itemURL, `{"format":"Blu-ray","notes":"box set","titles":[
+		{"tmdb_id":603,"media_type":"movie","title":"The Matrix","original_title":"The Matrix","year":1999,"poster_path":"/m.jpg"},
+		{"tmdb_id":null,"media_type":"movie","title":"Home Video","original_title":null,"year":null,"poster_path":null}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch status = %d", resp.StatusCode)
+	}
+	item := decode[db.Item](t, resp)
+	if item.Status != db.StatusIdentified || *item.Format != "Blu-ray" || item.Notes != "box set" {
+		t.Errorf("item = %q %q %q; want identified Blu-ray \"box set\"", item.Status, *item.Format, item.Notes)
+	}
+	if len(item.Titles) != 2 || item.Titles[0].Title != "The Matrix" || *item.Titles[0].TMDBID != 603 ||
+		item.Titles[1].Title != "Home Video" || item.Titles[1].TMDBID != nil {
+		t.Errorf("titles = %+v", item.Titles)
+	}
+
+	// Fields that are left out stay as they are.
+	item = decode[db.Item](t, patchItem(t, itemURL, `{"format":"UHD"}`))
+	if *item.Format != "UHD" || item.Notes != "box set" || len(item.Titles) != 2 {
+		t.Errorf("after format-only patch: %q %q %d titles; want UHD, notes and titles kept", *item.Format, item.Notes, len(item.Titles))
+	}
+
+	for name, body := range map[string]string{
+		"unknown format": `{"format":"VHS"}`,
+		"empty title":    `{"titles":[{"tmdb_id":null,"media_type":"movie","title":" "}]}`,
+		"bad media type": `{"titles":[{"tmdb_id":1,"media_type":"book","title":"X"}]}`,
+		"unknown field":  `{"status":"captured"}`,
+	} {
+		if resp := patchItem(t, itemURL, body); resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, resp.StatusCode)
+		}
+	}
+	if resp := patchItem(t, ts.URL+"/api/items/99", `{}`); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("patch of a missing item = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestTMDBSearchWithoutKey(t *testing.T) {
+	ts, _ := newTestServer(t)
+	if resp := get(t, ts.URL+"/api/tmdb/search?q=alien"); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when no TMDB key is configured", resp.StatusCode)
 	}
 }

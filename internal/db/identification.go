@@ -25,6 +25,10 @@ type Run struct {
 	Request  string
 	Response string
 	Error    string
+	// Token usage of the LLM calls in this step; nil when there were none.
+	InputTokens  *int64
+	OutputTokens *int64
+	CostUSD      *float64 // nil when the model's price is not configured
 }
 
 // TitleInput is a movie or series found on an item. TMDBID is nil when no
@@ -72,65 +76,67 @@ func (s *Store) NextCaptured(ctx context.Context) (*Item, error) {
 // AddRun stores the raw input and output of one identification step.
 func (s *Store) AddRun(ctx context.Context, run Run) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO identification_runs (item_id, step, model, request, response, error, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO identification_runs (item_id, step, model, request, response, error,
+		     input_tokens, output_tokens, cost_usd, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ItemID, run.Step, nullable(run.Model), nullable(run.Request), nullable(run.Response),
-		nullable(run.Error), time.Now().UTC().Format(time.RFC3339))
+		nullable(run.Error), run.InputTokens, run.OutputTokens, run.CostUSD,
+		time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("record %s run: %w", run.Step, err)
 	}
 	return nil
 }
 
-// SaveIdentification replaces an item's identification. Items that look like
-// a copy of another item (same barcode, or same titles in the same format)
-// are sent to review along with anything listed in ReviewReasons.
-func (s *Store) SaveIdentification(ctx context.Context, itemID int64, ident Identification) error {
+// ErrStale is returned when an item was changed by hand, re-queued or deleted
+// while it was being identified; the identification result is discarded.
+var ErrStale = errors.New("item changed during identification")
+
+// updateCurrent runs an UPDATE that must only apply while the item is still
+// queued at the given revision, and returns ErrStale when it no longer is.
+func updateCurrent(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, query string, args ...any) error {
+	res, err := exec.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrStale
+	}
+	return nil
+}
+
+// SaveIdentification replaces the identification of an item that the worker
+// picked up at the given revision. Items that look like a copy of another
+// item (same barcode, or same titles in the same format) are sent to review
+// along with anything listed in ReviewReasons.
+func (s *Store) SaveIdentification(ctx context.Context, itemID, revision int64, ident Identification) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM item_titles WHERE item_id = ?`, itemID); err != nil {
-		return fmt.Errorf("clear titles: %w", err)
-	}
-	// Unmatched guesses from an earlier run belong to nothing once unlinked.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM titles WHERE tmdb_id IS NULL AND id NOT IN (SELECT title_id FROM item_titles)`); err != nil {
-		return fmt.Errorf("clear unmatched titles: %w", err)
+	// Written first so the transaction holds the write lock before anything is read.
+	if err := updateCurrent(ctx, tx,
+		`UPDATE items SET format = ?, barcode = ?, confidence = ?, notes = ?, checkpoint = NULL
+		  WHERE id = ? AND revision = ? AND status = ?`,
+		nullable(ident.Format), nullable(ident.Barcode), nullable(ident.Confidence), ident.Notes,
+		itemID, revision, StatusCaptured); err != nil {
+		if errors.Is(err, ErrStale) {
+			return err
+		}
+		return fmt.Errorf("update item: %w", err)
 	}
 
-	var titleIDs []int64
-	allMatched := len(ident.Titles) > 0
-	for pos, t := range ident.Titles {
-		var id int64
-		if t.TMDBID != nil {
-			err = tx.QueryRowContext(ctx,
-				`INSERT INTO titles (tmdb_id, media_type, title, original_title, year, poster_path)
-				 VALUES (?, ?, ?, ?, ?, ?)
-				 ON CONFLICT (media_type, tmdb_id) DO UPDATE SET
-				     title = excluded.title, original_title = excluded.original_title,
-				     year = excluded.year, poster_path = excluded.poster_path
-				 RETURNING id`,
-				*t.TMDBID, t.MediaType, t.Title, nullable(t.OriginalTitle), t.Year, t.PosterPath).Scan(&id)
-		} else {
-			allMatched = false
-			err = tx.QueryRowContext(ctx,
-				`INSERT INTO titles (media_type, title, original_title, year) VALUES (?, ?, ?, ?) RETURNING id`,
-				t.MediaType, t.Title, nullable(t.OriginalTitle), t.Year).Scan(&id)
-		}
-		if err != nil {
-			return fmt.Errorf("save title %q: %w", t.Title, err)
-		}
-		if slices.Contains(titleIDs, id) {
-			continue // the same catalogue entry listed twice
-		}
-		titleIDs = append(titleIDs, id)
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO item_titles (item_id, title_id, position) VALUES (?, ?, ?)`, itemID, id, pos); err != nil {
-			return fmt.Errorf("link title %q: %w", t.Title, err)
-		}
+	titleIDs, allMatched, err := replaceTitles(ctx, tx, itemID, ident.Titles)
+	if err != nil {
+		return err
 	}
 
 	reasons := slices.Clone(ident.ReviewReasons)
@@ -147,13 +153,37 @@ func (s *Store) SaveIdentification(ctx context.Context, itemID int64, ident Iden
 		status = StatusNeedsReview
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE items SET status = ?, format = ?, barcode = ?, confidence = ?, notes = ?, review_reason = ?
-		 WHERE id = ?`,
-		status, nullable(ident.Format), nullable(ident.Barcode), nullable(ident.Confidence), ident.Notes,
-		nullable(strings.Join(reasons, "; ")), itemID); err != nil {
+		`UPDATE items SET status = ?, review_reason = ? WHERE id = ?`,
+		status, nullable(strings.Join(reasons, "; ")), itemID); err != nil {
 		return fmt.Errorf("update item: %w", err)
 	}
 	return tx.Commit()
+}
+
+// SaveCheckpoint stores the intermediate result of an identification that
+// started at the given revision.
+func (s *Store) SaveCheckpoint(ctx context.Context, itemID, revision int64, checkpoint string) error {
+	err := updateCurrent(ctx, s.db,
+		`UPDATE items SET checkpoint = ? WHERE id = ? AND revision = ? AND status = ?`,
+		checkpoint, itemID, revision, StatusCaptured)
+	if err != nil && !errors.Is(err, ErrStale) {
+		return fmt.Errorf("save checkpoint: %w", err)
+	}
+	return err
+}
+
+// Checkpoint returns the stored intermediate result of an item's
+// identification, or "" when there is none.
+func (s *Store) Checkpoint(ctx context.Context, itemID int64) (string, error) {
+	var checkpoint sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT checkpoint FROM items WHERE id = ?`, itemID).Scan(&checkpoint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("load checkpoint: %w", err)
+	}
+	return checkpoint.String, nil
 }
 
 // findDuplicates describes other items that look like the same release.
@@ -233,25 +263,30 @@ func queryIDs(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]int
 	return ids, rows.Err()
 }
 
-// RecordFailure counts a failed identification attempt. After maxAttempts the
-// item is sent to review instead of being retried again.
-func (s *Store) RecordFailure(ctx context.Context, itemID int64, reason string, maxAttempts int) error {
-	_, err := s.db.ExecContext(ctx,
+// RecordFailure counts a failed identification attempt of an item picked up
+// at the given revision. After maxAttempts the item is sent to review instead
+// of being retried again; maxAttempts 1 sends it to review straight away.
+func (s *Store) RecordFailure(ctx context.Context, itemID, revision int64, reason string, maxAttempts int) error {
+	err := updateCurrent(ctx, s.db,
 		`UPDATE items SET attempts = attempts + 1,
 		        status = CASE WHEN attempts + 1 >= ? THEN ? ELSE status END,
 		        review_reason = CASE WHEN attempts + 1 >= ? THEN ? ELSE review_reason END
-		  WHERE id = ?`,
-		maxAttempts, StatusNeedsReview, maxAttempts, "identification failed: "+reason, itemID)
-	if err != nil {
+		  WHERE id = ? AND revision = ? AND status = ?`,
+		maxAttempts, StatusNeedsReview, maxAttempts, "identification failed: "+reason,
+		itemID, revision, StatusCaptured)
+	if err != nil && !errors.Is(err, ErrStale) {
 		return fmt.Errorf("record failure: %w", err)
 	}
-	return nil
+	return err
 }
 
 // ResetForIdentification queues an item to be identified again from its photos.
+// Any identification already under way for it is discarded.
 func (s *Store) ResetForIdentification(ctx context.Context, itemID int64) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE items SET status = ?, attempts = 0, review_reason = NULL WHERE id = ?`, StatusCaptured, itemID)
+		`UPDATE items SET status = ?, attempts = 0, review_reason = NULL, checkpoint = NULL,
+		        revision = revision + 1
+		  WHERE id = ?`, StatusCaptured, itemID)
 	if err != nil {
 		return fmt.Errorf("reset item: %w", err)
 	}
@@ -263,19 +298,33 @@ func (s *Store) ResetForIdentification(ctx context.Context, itemID int64) error 
 
 // RunRecord is a stored identification step, as shown in an item's log.
 type RunRecord struct {
-	ID        int64   `json:"id"`
-	Step      string  `json:"step"`
-	Model     *string `json:"model"`
-	Request   *string `json:"request"`
-	Response  *string `json:"response"`
-	Error     *string `json:"error"`
-	CreatedAt string  `json:"created_at"`
+	ID           int64    `json:"id"`
+	Step         string   `json:"step"`
+	Model        *string  `json:"model"`
+	Request      *string  `json:"request"`
+	Response     *string  `json:"response"`
+	Error        *string  `json:"error"`
+	InputTokens  *int64   `json:"input_tokens"`
+	OutputTokens *int64   `json:"output_tokens"`
+	CostUSD      *float64 `json:"cost_usd"`
+	CreatedAt    string   `json:"created_at"`
+}
+
+// RunsCost sums the estimated cost of all of an item's runs, retries included.
+func (s *Store) RunsCost(ctx context.Context, itemID int64) (float64, error) {
+	var total float64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(cost_usd), 0) FROM identification_runs WHERE item_id = ?`, itemID).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("runs cost: %w", err)
+	}
+	return total, nil
 }
 
 // ListRuns returns an item's identification steps, newest first.
 func (s *Store) ListRuns(ctx context.Context, itemID int64) ([]RunRecord, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, step, model, request, response, error, created_at
+		`SELECT id, step, model, request, response, error, input_tokens, output_tokens, cost_usd, created_at
 		   FROM identification_runs WHERE item_id = ? ORDER BY id DESC`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -284,7 +333,8 @@ func (s *Store) ListRuns(ctx context.Context, itemID int64) ([]RunRecord, error)
 	runs := []RunRecord{}
 	for rows.Next() {
 		var r RunRecord
-		if err := rows.Scan(&r.ID, &r.Step, &r.Model, &r.Request, &r.Response, &r.Error, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Step, &r.Model, &r.Request, &r.Response, &r.Error,
+			&r.InputTokens, &r.OutputTokens, &r.CostUSD, &r.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list runs: %w", err)
 		}
 		runs = append(runs, r)
