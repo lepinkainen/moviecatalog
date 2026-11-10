@@ -42,7 +42,24 @@ type Item struct {
 	Format     *string   `json:"format"`
 	Barcode    *string   `json:"barcode"`
 	Notes      string    `json:"notes"`
-	Images     []Image   `json:"images"`
+	// Confidence is the identification's own estimate: high, medium or low.
+	Confidence *string `json:"confidence"`
+	// ReviewReason says why a needs_review item needs a human.
+	ReviewReason *string `json:"review_reason"`
+	Images       []Image `json:"images"`
+	Titles       []Title `json:"titles"`
+}
+
+// Title is a movie or series contained in an item.
+type Title struct {
+	ID            int64   `json:"id"`
+	ItemID        int64   `json:"-"`
+	TMDBID        *int64  `json:"tmdb_id"`
+	MediaType     string  `json:"media_type"`
+	Title         string  `json:"title"`
+	OriginalTitle *string `json:"original_title"`
+	Year          *int    `json:"year"`
+	PosterPath    *string `json:"poster_path"`
 }
 
 // Image is a stored photo of an item.
@@ -100,12 +117,12 @@ func (s *Store) CreateItem(ctx context.Context, now time.Time, save func(itemID 
 	return s.GetItem(ctx, id)
 }
 
-const itemColumns = `id, captured_at, status, format, barcode, notes`
+const itemColumns = `id, captured_at, status, format, barcode, notes, confidence, review_reason`
 
 func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	var it Item
 	var capturedAt string
-	if err := row.Scan(&it.ID, &capturedAt, &it.Status, &it.Format, &it.Barcode, &it.Notes); err != nil {
+	if err := row.Scan(&it.ID, &capturedAt, &it.Status, &it.Format, &it.Barcode, &it.Notes, &it.Confidence, &it.ReviewReason); err != nil {
 		return nil, err
 	}
 	t, err := time.Parse(time.RFC3339, capturedAt)
@@ -114,6 +131,7 @@ func scanItem(row interface{ Scan(...any) error }) (*Item, error) {
 	}
 	it.CapturedAt = t
 	it.Images = []Image{}
+	it.Titles = []Title{}
 	return &it, nil
 }
 
@@ -132,6 +150,11 @@ func (s *Store) GetItem(ctx context.Context, id int64) (*Item, error) {
 		return nil, err
 	}
 	it.Images = append(it.Images, images...)
+	titles, err := s.queryTitles(ctx, `WHERE it.item_id = ? ORDER BY it.position`, id)
+	if err != nil {
+		return nil, err
+	}
+	it.Titles = append(it.Titles, titles...)
 	return it, nil
 }
 
@@ -164,6 +187,15 @@ func (s *Store) ListItems(ctx context.Context) ([]*Item, error) {
 	for _, img := range images {
 		if it, ok := byID[img.ItemID]; ok {
 			it.Images = append(it.Images, img)
+		}
+	}
+	titles, err := s.queryTitles(ctx, `ORDER BY it.item_id, it.position`)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range titles {
+		if it, ok := byID[t.ItemID]; ok {
+			it.Titles = append(it.Titles, t)
 		}
 	}
 	return items, nil
@@ -214,4 +246,27 @@ func (s *Store) queryImages(ctx context.Context, clause string, args ...any) ([]
 		return nil, fmt.Errorf("query images: %w", err)
 	}
 	return images, nil
+}
+
+func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]Title, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT t.id, it.item_id, t.tmdb_id, t.media_type, t.title, t.original_title, t.year, t.poster_path
+		   FROM item_titles it JOIN titles t ON t.id = it.title_id `+clause, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query titles: %w", err)
+	}
+	defer rows.Close()
+
+	var titles []Title
+	for rows.Next() {
+		var t Title
+		if err := rows.Scan(&t.ID, &t.ItemID, &t.TMDBID, &t.MediaType, &t.Title, &t.OriginalTitle, &t.Year, &t.PosterPath); err != nil {
+			return nil, fmt.Errorf("query titles: %w", err)
+		}
+		titles = append(titles, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query titles: %w", err)
+	}
+	return titles, nil
 }

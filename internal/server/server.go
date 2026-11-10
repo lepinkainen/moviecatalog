@@ -34,6 +34,19 @@ type Server struct {
 	dataDir string
 	ui      fs.FS
 	log     *slog.Logger
+	// notify is called when items are waiting for identification.
+	notify func()
+}
+
+// OnPending registers fn to be called whenever items are waiting for identification.
+func (s *Server) OnPending(fn func()) {
+	s.notify = fn
+}
+
+func (s *Server) pending() {
+	if s.notify != nil {
+		s.notify()
+	}
 }
 
 // New creates a server storing photos under dataDir/images and serving the
@@ -51,6 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/items", s.handleListItems)
 	mux.HandleFunc("GET /api/items/{id}", s.handleGetItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
+	mux.HandleFunc("POST /api/items/{id}/identify", s.handleIdentifyItem)
 	mux.HandleFunc("GET /api/images/{id}", s.handleImage)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
@@ -138,6 +152,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "could not save item")
 		return
 	}
+	s.pending()
 	s.writeJSON(w, http.StatusCreated, item)
 }
 
@@ -205,6 +220,26 @@ func (s *Server) handleGetItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, item)
+}
+
+// handleIdentifyItem queues an item to be identified again from its photos.
+func (s *Server) handleIdentifyItem(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r)
+	if !ok {
+		return
+	}
+	err := s.store.ResetForIdentification(r.Context(), id)
+	if errors.Is(err, db.ErrNotFound) {
+		s.writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+	if err != nil {
+		s.log.Error("queue identification", "id", id, "error", err)
+		s.writeError(w, http.StatusInternalServerError, "could not queue item")
+		return
+	}
+	s.pending()
+	s.handleGetItem(w, r)
 }
 
 func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
+	"github.com/lepinkainen/moviecatalog/internal/identify"
 	"github.com/lepinkainen/moviecatalog/internal/server"
 	"github.com/lepinkainen/moviecatalog/internal/webui"
 )
@@ -44,14 +45,32 @@ func run(log *slog.Logger) error {
 	}
 	defer store.Close()
 
-	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           server.New(store, dataDir, webui.FS(), log).Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	srv := server.New(store, dataDir, webui.FS(), log)
+
+	openAIKey, tmdbKey := os.Getenv("OPENAI_API_KEY"), os.Getenv("TMDB_API_KEY")
+	if openAIKey != "" && tmdbKey != "" {
+		llm := &identify.OpenAI{
+			APIKey: openAIKey,
+			Model:  envOr("OPENAI_MODEL", "gpt-6-astra"),
+			HTTP:   &http.Client{Timeout: 5 * time.Minute},
+		}
+		tmdb := &identify.TMDB{APIKey: tmdbKey, HTTP: &http.Client{Timeout: 30 * time.Second}}
+		worker := identify.NewWorker(store, dataDir, llm, tmdb, log)
+		srv.OnPending(worker.Notify)
+		go worker.Run(ctx)
+		log.Info("identification enabled", "model", llm.Model)
+	} else {
+		log.Warn("identification disabled: set OPENAI_API_KEY and TMDB_API_KEY to enable it; captures are still stored")
+	}
+
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	errCh := make(chan error, 1)
 	go func() {

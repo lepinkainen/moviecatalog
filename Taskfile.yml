@@ -37,6 +37,11 @@ tasks:
     cmds:
       - go run .
 
+  dev-op:
+    desc: Run the Go server with API keys resolved from 1Password (op.env)
+    cmds:
+      - op run --env-file=op.env -- go run .
+
   web-install:
     desc: Install frontend dependencies
     cmds:

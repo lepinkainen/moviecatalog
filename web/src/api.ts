@@ -5,6 +5,16 @@ export interface ItemImage {
   url: string;
 }
 
+export interface Title {
+  id: number;
+  tmdb_id: number | null;
+  media_type: 'movie' | 'tv';
+  title: string;
+  original_title: string | null;
+  year: number | null;
+  poster_path: string | null;
+}
+
 export interface Item {
   id: number;
   captured_at: string;
@@ -12,7 +22,10 @@ export interface Item {
   format: string | null;
   barcode: string | null;
   notes: string;
+  confidence: 'high' | 'medium' | 'low' | null;
+  review_reason: string | null;
   images: ItemImage[];
+  titles: Title[];
 }
 
 async function check(resp: Response): Promise<Response> {
