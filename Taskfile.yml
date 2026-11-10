@@ -33,14 +33,14 @@ tasks:
       - npm --prefix web run check
 
   dev:
-    desc: Run the Go server locally (API on :8080)
+    desc: Run the Go server with automatic rebuild and restart on changes (air, API on :8080)
     cmds:
-      - go run .
+      - mise exec -- air
 
   dev-op:
-    desc: Run the Go server with API keys resolved from 1Password (op.env)
+    desc: Like dev, with API keys resolved from 1Password (op.env) once at start
     cmds:
-      - op run --env-file=op.env -- go run .
+      - op run --env-file=op.env -- mise exec -- air
 
   web-install:
     desc: Install frontend dependencies
