@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/items/{id}", s.handleGetItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 	mux.HandleFunc("POST /api/items/{id}/identify", s.handleIdentifyItem)
+	mux.HandleFunc("GET /api/items/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/images/{id}", s.handleImage)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
@@ -242,10 +243,30 @@ func (s *Server) handleIdentifyItem(w http.ResponseWriter, r *http.Request) {
 	s.handleGetItem(w, r)
 }
 
+// handleListRuns returns the raw identification steps recorded for an item.
+func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r)
+	if !ok {
+		return
+	}
+	runs, err := s.store.ListRuns(r.Context(), id)
+	if err != nil {
+		s.log.Error("list runs", "id", id, "error", err)
+		s.writeError(w, http.StatusInternalServerError, "could not load identification log")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, runs)
+}
+
 func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.pathID(w, r)
 	if !ok {
 		return
+	}
+	// Looked up first so the cached thumbnails can be removed along with the photos.
+	var images []db.Image
+	if item, err := s.store.GetItem(r.Context(), id); err == nil {
+		images = item.Images
 	}
 	err := s.store.DeleteItem(r.Context(), id)
 	if errors.Is(err, db.ErrNotFound) {
@@ -261,6 +282,7 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, r *http.Request) {
 	if err := os.RemoveAll(dir); err != nil {
 		s.log.Warn("remove item images", "id", id, "error", err)
 	}
+	s.removeThumbs(images)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -281,6 +303,15 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Image ids are never reused and photos are never rewritten.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	if size := r.URL.Query().Get("w"); size != "" {
+		width, ok := thumbWidths[size]
+		if !ok {
+			s.writeError(w, http.StatusBadRequest, "unsupported image width")
+			return
+		}
+		s.serveThumb(w, r, img, width)
+		return
+	}
 	w.Header().Set("Content-Type", img.ContentType)
 	http.ServeFile(w, r, filepath.Join(s.dataDir, img.Path))
 }

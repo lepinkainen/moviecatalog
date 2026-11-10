@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -19,9 +22,22 @@ import (
 )
 
 var (
-	jpegBytes = append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, []byte("front-photo-data")...)
-	pngBytes  = append([]byte("\x89PNG\r\n\x1a\n"), []byte("back-photo-data")...)
+	jpegBytes = encodeTestImage(func(w io.Writer, img image.Image) error { return jpeg.Encode(w, img, nil) })
+	pngBytes  = encodeTestImage(png.Encode)
 )
+
+// encodeTestImage renders a 400x600 test photo in the given format.
+func encodeTestImage(encode func(io.Writer, image.Image) error) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 400, 600))
+	for i := range img.Pix {
+		img.Pix[i] = uint8(i)
+	}
+	var buf bytes.Buffer
+	if err := encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
 
 var testUI = fstest.MapFS{
 	"index.html":    {Data: []byte("<!doctype html><title>test ui</title>")},
@@ -195,5 +211,55 @@ func TestFrontendNotBuilt(t *testing.T) {
 	}
 	if resp := get(t, ts.URL+"/api/health"); resp.StatusCode != http.StatusOK {
 		t.Errorf("GET /api/health = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestThumbnails(t *testing.T) {
+	ts, dataDir := newTestServer(t)
+	item := decode[db.Item](t, postCapture(t, ts.URL, map[string][]byte{"front": jpegBytes, "back": pngBytes}))
+
+	// Both source formats come back as a JPEG scaled to the requested width.
+	for _, img := range item.Images {
+		resp := get(t, ts.URL+img.URL+"?w=160")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s thumbnail status = %d", img.Kind, resp.StatusCode)
+		}
+		thumb, format, err := image.Decode(resp.Body)
+		if err != nil {
+			t.Fatalf("%s thumbnail: %v", img.Kind, err)
+		}
+		if b := thumb.Bounds(); format != "jpeg" || b.Dx() != 160 || b.Dy() != 240 {
+			t.Errorf("%s thumbnail = %s %dx%d, want jpeg 160x240", img.Kind, format, b.Dx(), b.Dy())
+		}
+	}
+	// A photo narrower than the requested width is not enlarged.
+	big, _, err := image.Decode(get(t, ts.URL+item.Images[0].URL+"?w=1200").Body)
+	if err != nil || big.Bounds().Dx() != 400 {
+		t.Errorf("w=1200 of a 400px photo: width %v, err %v; want 400", big, err)
+	}
+	if resp := get(t, ts.URL+item.Images[0].URL+"?w=999"); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("unsupported width status = %d, want 400", resp.StatusCode)
+	}
+
+	// Deleting the item removes its cached thumbnails too.
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/items/1", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if left, _ := os.ReadDir(filepath.Join(dataDir, "thumbs")); len(left) != 0 {
+		t.Errorf("%d thumbnails left after delete", len(left))
+	}
+}
+
+func TestRunsEndpoint(t *testing.T) {
+	ts, _ := newTestServer(t)
+	postCapture(t, ts.URL, map[string][]byte{"front": jpegBytes, "back": pngBytes})
+
+	resp := get(t, ts.URL+"/api/items/1/runs")
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "[]" {
+		t.Errorf("runs of a fresh item = %d %q, want 200 []", resp.StatusCode, body)
 	}
 }

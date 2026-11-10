@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { createItem, deleteItem, listItems } from './api';
+  import { createItem, deleteItem, listItems, thumb } from './api';
 
   type Capture = {
     key: number;
@@ -76,7 +76,8 @@
     try {
       const item = await createItem(capture.front, capture.back);
       URL.revokeObjectURL(capture.thumb);
-      capture.thumb = item.images.find((i) => i.kind === 'front')?.url ?? '';
+      const saved = item.images.find((i) => i.kind === 'front');
+      capture.thumb = saved ? thumb(saved, 160) : '';
       capture.front = undefined;
       capture.back = undefined;
       capture.itemId = item.id;

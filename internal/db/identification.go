@@ -260,3 +260,37 @@ func (s *Store) ResetForIdentification(ctx context.Context, itemID int64) error 
 	}
 	return nil
 }
+
+// RunRecord is a stored identification step, as shown in an item's log.
+type RunRecord struct {
+	ID        int64   `json:"id"`
+	Step      string  `json:"step"`
+	Model     *string `json:"model"`
+	Request   *string `json:"request"`
+	Response  *string `json:"response"`
+	Error     *string `json:"error"`
+	CreatedAt string  `json:"created_at"`
+}
+
+// ListRuns returns an item's identification steps, newest first.
+func (s *Store) ListRuns(ctx context.Context, itemID int64) ([]RunRecord, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, step, model, request, response, error, created_at
+		   FROM identification_runs WHERE item_id = ? ORDER BY id DESC`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+	runs := []RunRecord{}
+	for rows.Next() {
+		var r RunRecord
+		if err := rows.Scan(&r.ID, &r.Step, &r.Model, &r.Request, &r.Response, &r.Error, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("list runs: %w", err)
+		}
+		runs = append(runs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	return runs, nil
+}
