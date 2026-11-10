@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getItem, listRuns, statusLabel, thumb, type Item, type Run } from './api';
+  import ReviewPanel from './ReviewPanel.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -40,6 +41,13 @@
     return new Date(iso).toLocaleString();
   }
 
+  const priced = $derived(runs.filter((r) => r.cost_usd !== null));
+  const totalCost = $derived(priced.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0));
+
+  function usd(n: number): string {
+    return `$${n.toFixed(4)}`;
+  }
+
   function tmdbURL(mediaType: string, tmdbID: number): string {
     return `https://www.themoviedb.org/${mediaType}/${tmdbID}`;
   }
@@ -65,10 +73,6 @@
       </h1>
       <p class="muted">Item #{item.id} · captured {when(item.captured_at)}</p>
     </header>
-
-    {#if item.status === 'needs_review'}
-      <p class="review">Needs review: {item.review_reason ?? 'no reason recorded'}</p>
-    {/if}
 
     <div class="photos">
       {#each item.images as image (image.id)}
@@ -108,13 +112,25 @@
       </dd>
     </dl>
 
+    <!-- Recreated whenever the stored item changes, so the form never shows stale values. -->
+    {#key `${item.status}|${item.format}|${item.notes}|${item.titles.map((t) => t.id).join(',')}`}
+      <ReviewPanel {item} onchanged={load} />
+    {/key}
+
     <section>
       <h2>Identification log</h2>
+      {#if priced.length > 0}
+        <p class="muted">Estimated cost: {usd(totalCost)} over {priced.length} LLM call{priced.length === 1 ? '' : 's'}</p>
+      {/if}
       {#each runs as run (run.id)}
         <details>
           <summary>
             <span class="step">{run.step}</span>
             {#if run.model}<span class="muted">{run.model}</span>{/if}
+            {#if run.input_tokens !== null}
+              <span class="muted">{run.input_tokens} in / {run.output_tokens} out</span>
+            {/if}
+            {#if run.cost_usd !== null}<span class="muted">{usd(run.cost_usd)}</span>{/if}
             {#if run.error}<span class="review">failed</span>{/if}
             <span class="muted time">{when(run.created_at)}</span>
           </summary>
