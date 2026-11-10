@@ -1,0 +1,35 @@
+version: '3'
+
+vars:
+  APP_NAME: moviecatalog
+  BUILD_DIR: build
+
+tasks:
+  build:
+    desc: Run lint and tests, then build the binary into build/
+    cmds:
+      - task: lint
+      - task: test
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -o {{.BUILD_DIR}}/{{.APP_NAME}} .
+
+  build-linux:
+    desc: Build the Linux binary into build/
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o {{.BUILD_DIR}}/{{.APP_NAME}}-linux-amd64 .
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  dev:
+    desc: Run the server locally
+    cmds:
+      - go run .
