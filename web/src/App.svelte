@@ -2,13 +2,23 @@
   import Capture from './Capture.svelte';
   import Catalogue from './Catalogue.svelte';
   import ItemDetail from './ItemDetail.svelte';
+  import Library from './Library.svelte';
 
-  type Route = { page: 'capture' } | { page: 'catalogue' } | { page: 'item'; id: number };
+  type Route =
+    | { page: 'capture' }
+    | { page: 'catalogue' }
+    | { page: 'item'; id: number }
+    | { page: 'library'; selected: number | null; q: string | null };
 
   function parse(hash: string): Route {
     const item = hash.match(/^#\/items\/(\d+)$/);
     if (item) return { page: 'item', id: Number(item[1]) };
     if (hash === '#/items') return { page: 'catalogue' };
+    const library = hash.match(/^#\/library(?:\/(\d+))?(?:\?(.*))?$/);
+    if (library) {
+      const q = new URLSearchParams(library[2] ?? '').get('q');
+      return { page: 'library', selected: library[1] ? Number(library[1]) : null, q };
+    }
     return { page: 'capture' };
   }
 
@@ -19,14 +29,23 @@
 
 <nav>
   <a href="#/capture" aria-current={route.page === 'capture' ? 'page' : undefined}>Capture</a>
-  <a href="#/items" aria-current={route.page !== 'capture' ? 'page' : undefined}>Catalogue</a>
+  <a href="#/items" aria-current={route.page === 'catalogue' || route.page === 'item' ? 'page' : undefined}
+    >Catalogue</a
+  >
+  <a href="#/library" aria-current={route.page === 'library' ? 'page' : undefined}>Library</a>
 </nav>
 
-{#if route.page === 'capture'}
-  <Capture />
-{:else if route.page === 'catalogue'}
+<!-- Capture stays mounted so photos waiting for their other side or for an
+     upload survive a visit to the catalogue. -->
+<div hidden={route.page !== 'capture'}>
+  <Capture active={route.page === 'capture'} />
+</div>
+
+{#if route.page === 'catalogue'}
   <Catalogue />
-{:else}
+{:else if route.page === 'library'}
+  <Library selected={route.selected} q={route.q} />
+{:else if route.page === 'item'}
   {#key route.id}
     <ItemDetail id={route.id} />
   {/key}

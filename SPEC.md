@@ -16,7 +16,7 @@ The question the catalogue answers: **do I own this movie, and in what quality?*
 
 ## Non-goals (phase 1)
 
-- Polished browsing UI, search, filters, statistics.
+- Statistics, and browsing beyond the library view below.
 - Edition tracking: steelbooks, cuts, regions, audio/subtitle languages.
 - Barcode lookup services. The barcode is stored, not looked up.
 - Loans, wishlist, watch history, ratings.
@@ -91,9 +91,15 @@ Notes:
 4. Anything low-confidence or unmatched lands in a **review queue**, as does any
    item whose barcode or (title, format) pair matches an existing item.
 
-The model is a config value; default to OpenAI's most capable vision model at
-implementation time, since ~500 items is a small, one-off batch. Every step's raw input and output is
+The model is a config value (`OPENAI_MODEL`), defaulting to `gpt-6.1-sol`. On the
+first six test items it gave the same answers as the flagship `gpt-6-astra` at
+about a fifth of the price: roughly 1.4 cents per item, about $7 for 500 items. Every step's raw input and output is
 stored so the pipeline is re-runnable per item.
+
+Each LLM call's token counts are stored with its run. The estimated cost is stored too,
+at the list price in force at the time. Prices come from LiteLLM's
+`model_prices_and_context_window.json`, which is embedded in the binary and updated by hand. A
+model missing from it is still used, but its cost is not estimated.
 
 ## Data model (sketch)
 
@@ -112,7 +118,7 @@ stored so the pipeline is re-runnable per item.
 - **Go server**: JSON API under `/api`, image upload and serving, background
   identification worker (in-process, driven by item status in SQLite — no queue
   infrastructure), embedded frontend.
-- **Frontend**: small SPA with two areas, capture and viewer. In development its
+- **Frontend**: small SPA with three areas: capture and viewer (phone first), and library (desktop first). In development its
   dev server proxies `/api` to the Go process and is exposed on the LAN so the
   phone gets live reloads too.
 - **Config**: API keys (LLM, TMDB) and data directory via environment variables.
@@ -124,6 +130,23 @@ stored so the pipeline is re-runnable per item.
 - Review queue: fix the title by hand (TMDB search box), change format, re-run
   identification, delete. Possible duplicates are shown side by side with
   "keep both" (a genuine second copy) or "delete this one" (scanned twice).
+
+## Library (desktop)
+
+A desktop view for two jobs: browsing the collection, and checking "do I own
+this?" while looking at a disc sale in another tab.
+
+- One poster card per movie or series (TMDB poster), however many discs hold it,
+  with the best format owned as a badge. Titles from items still in review are
+  shown and marked; items still waiting are not shown, only counted.
+- Search ignores case, accents and punctuation, and skips the words shop listings
+  add ("Blu-ray", "4K", "Steelbook"…), so a pasted listing title finds the movie.
+  A year in the search matches the release year ±1. No match says plainly "Not in
+  your collection".
+- `#/library?q=…` opens with a search, so it can be set up as a browser keyword search.
+- Filters: best format, movies or series. Sort: title (ignoring a leading
+  "The"/"A"/"An"), year, recently added.
+- Selecting a card lists the discs that hold it, each linking to the item detail.
 
 ## Build order
 

@@ -1,14 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createItem, deleteItem, listItems, thumb } from './api';
+  import { loadPending, removePending, savePending } from './pending';
+
+  // The page stays mounted while hidden; active says whether it is on screen.
+  let { active }: { active: boolean } = $props();
 
   type Capture = {
     key: number;
     state: 'uploading' | 'done' | 'failed' | 'removing';
     thumb: string;
-    // Photos are held only until the server has them.
-    front?: File;
-    back?: File;
+    // Photos are held, here and in browser storage, only until the server has them.
+    front?: Blob;
+    back?: Blob;
     itemId?: number;
     error?: string;
   };
@@ -16,23 +20,59 @@
   // How many finished captures stay visible for a quick sanity check and undo.
   const RECENT = 6;
 
-  let front = $state<File | null>(null);
+  let front = $state<Blob | null>(null);
   let frontThumb = $state<string | null>(null);
   let captures = $state<Capture[]>([]);
   let total = $state<number | null>(null);
   let loadError = $state<string | null>(null);
-  let nextKey = 0;
+  // Time-based so keys never collide with captures restored from an earlier visit.
+  let nextKey = Date.now();
 
   const side = $derived(front ? 'back' : 'front');
   const unsaved = $derived(captures.filter((c) => c.state === 'uploading' || c.state === 'failed').length);
 
-  onMount(async () => {
-    try {
-      total = (await listItems()).length;
-    } catch (e) {
-      loadError = message(e);
-    }
+  // Recount whenever the page is shown: items may have been deleted in the catalogue meanwhile.
+  $effect(() => {
+    if (!active) return;
+    let stale = false;
+    listItems().then(
+      (items) => {
+        if (!stale) {
+          total = items.length;
+          loadError = null;
+          retryFailed(); // the server is reachable again
+        }
+      },
+      (e) => {
+        if (!stale) loadError = message(e);
+      },
+    );
+    return () => {
+      stale = true;
+    };
   });
+
+  // Bring back photos that had not reached the server when the page was last closed.
+  onMount(async () => {
+    const restored = await loadPending();
+    for (const p of restored) {
+      if (p.id === 'front') {
+        // A photo taken while storage was loading is newer.
+        if (!front) {
+          front = p.front;
+          frontThumb = URL.createObjectURL(p.front);
+        }
+      } else if (!find(p.id)) {
+        captures.push({ key: p.id, state: 'failed', thumb: URL.createObjectURL(p.front), front: p.front, back: p.back });
+      }
+    }
+    captures.sort((a, b) => b.key - a.key);
+    retryFailed();
+  });
+
+  function retryFailed() {
+    for (const c of captures) if (c.state === 'failed') upload(c.key);
+  }
 
   function message(e: unknown): string {
     return e instanceof Error ? e.message : String(e);
@@ -52,11 +92,16 @@
     if (!front) {
       front = file;
       frontThumb = URL.createObjectURL(file);
+      savePending({ id: 'front', front: file });
       return;
     }
 
     const key = nextKey++;
     captures.unshift({ key, state: 'uploading', thumb: frontThumb!, front, back: file });
+    // Stored before uploading, so a reload mid-upload loses nothing. IndexedDB
+    // applies the two writes in this order, so the front is never in neither.
+    savePending({ id: key, front, back: file });
+    removePending('front');
     front = null;
     frontThumb = null;
     upload(key);
@@ -66,6 +111,7 @@
     if (frontThumb) URL.revokeObjectURL(frontThumb);
     front = null;
     frontThumb = null;
+    removePending('front');
   }
 
   async function upload(key: number) {
@@ -82,6 +128,7 @@
       capture.back = undefined;
       capture.itemId = item.id;
       capture.state = 'done';
+      removePending(key);
       if (total !== null) total += 1;
       trim();
     } catch (e) {
@@ -103,6 +150,7 @@
       // Never reached the server: nothing to delete there.
       URL.revokeObjectURL(capture.thumb);
       captures = captures.filter((c) => c.key !== key);
+      removePending(key);
       return;
     }
     capture.state = 'removing';
@@ -121,7 +169,7 @@
   }
 </script>
 
-<svelte:window onbeforeunload={warnBeforeLeaving} />
+<svelte:window onbeforeunload={warnBeforeLeaving} ononline={retryFailed} />
 
 <main>
   <header>
