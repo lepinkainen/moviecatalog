@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
@@ -30,12 +32,15 @@ var imageExts = map[string]string{
 type Server struct {
 	store   *db.Store
 	dataDir string
+	ui      fs.FS
 	log     *slog.Logger
 }
 
-// New creates a server storing photos under dataDir/images.
-func New(store *db.Store, dataDir string, log *slog.Logger) *Server {
-	return &Server{store: store, dataDir: dataDir, log: log}
+// New creates a server storing photos under dataDir/images and serving the
+// built frontend from ui. ui may be nil or empty when the frontend has not
+// been built.
+func New(store *db.Store, dataDir string, ui fs.FS, log *slog.Logger) *Server {
+	return &Server{store: store, dataDir: dataDir, ui: ui, log: log}
 }
 
 // Handler returns the HTTP routes.
@@ -47,7 +52,34 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/items/{id}", s.handleGetItem)
 	mux.HandleFunc("DELETE /api/items/{id}", s.handleDeleteItem)
 	mux.HandleFunc("GET /api/images/{id}", s.handleImage)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		s.writeError(w, http.StatusNotFound, "not found")
+	})
+	mux.Handle("/", s.uiHandler())
 	return s.logRequests(mux)
+}
+
+// uiHandler serves the embedded frontend, or an explanation when it has not been built.
+func (s *Server) uiHandler() http.Handler {
+	if s.ui != nil {
+		if _, err := fs.Stat(s.ui, "index.html"); err == nil {
+			files := http.FileServerFS(s.ui)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasPrefix(r.URL.Path, "/assets/") {
+					// Vite puts a content hash in every asset file name.
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
+				files.ServeHTTP(w, r)
+			})
+		}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "The frontend is not built into this binary.\n"+
+			"Run `task build`, or use the Vite dev server with `task web-dev`.",
+			http.StatusServiceUnavailable)
+	})
 }
 
 // uploadError is a problem with the request itself, reported to the client.

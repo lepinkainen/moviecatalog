@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
 )
@@ -20,7 +23,17 @@ var (
 	pngBytes  = append([]byte("\x89PNG\r\n\x1a\n"), []byte("back-photo-data")...)
 )
 
+var testUI = fstest.MapFS{
+	"index.html":    {Data: []byte("<!doctype html><title>test ui</title>")},
+	"assets/app.js": {Data: []byte("console.log('ui')")},
+}
+
 func newTestServer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	return newTestServerWithUI(t, testUI)
+}
+
+func newTestServerWithUI(t *testing.T, ui fs.FS) (*httptest.Server, string) {
 	t.Helper()
 	dataDir := t.TempDir()
 	store, err := db.Open(filepath.Join(dataDir, "test.db"))
@@ -28,7 +41,7 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
-	srv := New(store, dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := New(store, dataDir, ui, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, dataDir
@@ -148,5 +161,39 @@ func TestCaptureRejectsBadUploads(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(dataDir, "images"))
 	if len(entries) != 0 {
 		t.Errorf("images directory has %d leftover entries", len(entries))
+	}
+}
+
+func TestFrontend(t *testing.T) {
+	ts, _ := newTestServer(t)
+
+	resp := get(t, ts.URL+"/")
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "test ui") {
+		t.Errorf("GET / = %d %q, want the index page", resp.StatusCode, body)
+	}
+	if cc := resp.Header.Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("index Cache-Control = %q, want no-cache", cc)
+	}
+	if cc := get(t, ts.URL+"/assets/app.js").Header.Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("asset Cache-Control = %q, want immutable", cc)
+	}
+
+	// Unknown API paths are JSON 404s, not frontend files.
+	resp = get(t, ts.URL+"/api/nope")
+	if resp.StatusCode != http.StatusNotFound || resp.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("GET /api/nope = %d %s, want JSON 404", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+}
+
+func TestFrontendNotBuilt(t *testing.T) {
+	// A dist directory holding only the placeholder, as in a fresh checkout.
+	ts, _ := newTestServerWithUI(t, fstest.MapFS{".gitkeep": {}})
+
+	if resp := get(t, ts.URL+"/"); resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("GET / = %d, want 503", resp.StatusCode)
+	}
+	if resp := get(t, ts.URL+"/api/health"); resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /api/health = %d, want 200", resp.StatusCode)
 	}
 }

@@ -6,8 +6,9 @@ vars:
 
 tasks:
   build:
-    desc: Run lint and tests, then build the binary into build/
+    desc: Run lint and tests, build the frontend, then build the binary into build/
     cmds:
+      - task: web-build
       - task: lint
       - task: test
       - mkdir -p {{.BUILD_DIR}}
@@ -15,6 +16,7 @@ tasks:
 
   build-linux:
     desc: Build the Linux binary into build/
+    deps: [web-build]
     cmds:
       - mkdir -p {{.BUILD_DIR}}
       - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o {{.BUILD_DIR}}/{{.APP_NAME}}-linux-amd64 .
@@ -25,11 +27,34 @@ tasks:
       - go test ./...
 
   lint:
-    desc: Run go vet
+    desc: Run go vet and the frontend type check
     cmds:
       - go vet ./...
+      - npm --prefix web run check
 
   dev:
-    desc: Run the server locally
+    desc: Run the Go server locally (API on :8080)
     cmds:
       - go run .
+
+  web-install:
+    desc: Install frontend dependencies
+    cmds:
+      - npm --prefix web install
+    sources:
+      - web/package.json
+      - web/package-lock.json
+    generates:
+      - web/node_modules/.package-lock.json
+
+  web-dev:
+    desc: Run the Vite dev server with live reload (proxies /api to :8080)
+    deps: [web-install]
+    cmds:
+      - npm --prefix web run dev
+
+  web-build:
+    desc: Build the frontend into internal/webui/dist for embedding
+    deps: [web-install]
+    cmds:
+      - npm --prefix web run build

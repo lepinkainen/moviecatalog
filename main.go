@@ -13,6 +13,7 @@ import (
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
 	"github.com/lepinkainen/moviecatalog/internal/server"
+	"github.com/lepinkainen/moviecatalog/internal/webui"
 )
 
 func envOr(key, fallback string) string {
@@ -45,7 +46,7 @@ func run(log *slog.Logger) error {
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(store, dataDir, log).Handler(),
+		Handler:           server.New(store, dataDir, webui.FS(), log).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

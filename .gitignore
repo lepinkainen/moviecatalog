@@ -1,2 +1,8 @@
 /data/
 /build/
+/web/node_modules/
+
+# Built frontend; the placeholder keeps the Go embed compiling before the first build.
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+/.task/
