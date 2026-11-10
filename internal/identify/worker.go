@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
+	"github.com/lepinkainen/moviecatalog/internal/photo"
 )
 
 const (
@@ -117,11 +118,11 @@ func (w *Worker) process(ctx context.Context, item *db.Item) error {
 	for _, img := range item.Images {
 		photos[img.Kind] = filepath.Join(w.dataDir, img.Path)
 	}
-	front, err := loadImage(photos[db.KindFront])
+	front, err := photo.Load(photos[db.KindFront])
 	if err != nil {
 		return fmt.Errorf("front photo: %w", err)
 	}
-	back, err := loadImage(photos[db.KindBack])
+	back, err := photo.Load(photos[db.KindBack])
 	if err != nil {
 		return fmt.Errorf("back photo: %w", err)
 	}

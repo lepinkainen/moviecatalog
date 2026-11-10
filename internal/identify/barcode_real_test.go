@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/lepinkainen/moviecatalog/internal/photo"
 )
 
 // TestRealPhotos prints what DecodeBarcode reads from the photos in
@@ -16,7 +18,7 @@ func TestRealPhotos(t *testing.T) {
 	}
 	paths, _ := filepath.Glob(pattern)
 	for _, path := range paths {
-		img, err := loadImage(path)
+		img, err := photo.Load(path)
 		if err != nil {
 			t.Fatal(err)
 		}

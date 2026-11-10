@@ -4,32 +4,15 @@ package identify
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/jpeg"
-	_ "image/png"
-	"os"
 
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
 )
 
 // llmMaxSide is the longest image side sent to the LLM. Cover text stays
 // legible at this size and the upload is a fraction of the camera original.
 const llmMaxSide = 2048
-
-func loadImage(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	img, _, err := image.Decode(f)
-	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
-	}
-	return img, nil
-}
 
 // encodeForLLM returns img as a JPEG no larger than llmMaxSide on its longest side.
 func encodeForLLM(img image.Image) ([]byte, error) {
