@@ -79,14 +79,7 @@ func replaceTitles(ctx context.Context, tx *sql.Tx, itemID int64, titles []Title
 		var id int64
 		var err error
 		if t.TMDBID != nil {
-			err = tx.QueryRowContext(ctx,
-				`INSERT INTO titles (tmdb_id, media_type, title, original_title, year, poster_path)
-				 VALUES (?, ?, ?, ?, ?, ?)
-				 ON CONFLICT (media_type, tmdb_id) DO UPDATE SET
-				     title = excluded.title, original_title = excluded.original_title,
-				     year = excluded.year, poster_path = excluded.poster_path
-				 RETURNING id`,
-				*t.TMDBID, t.MediaType, t.Title, nullable(t.OriginalTitle), t.Year, t.PosterPath).Scan(&id)
+			id, err = upsertMatchedTitle(ctx, tx, t)
 		} else {
 			allMatched = false
 			err = tx.QueryRowContext(ctx,
@@ -106,4 +99,19 @@ func replaceTitles(ctx context.Context, tx *sql.Tx, itemID int64, titles []Title
 		}
 	}
 	return ids, allMatched, nil
+}
+
+// upsertMatchedTitle saves a title that has a TMDB id, refreshing the stored
+// names and poster, and returns its row id.
+func upsertMatchedTitle(ctx context.Context, tx *sql.Tx, t TitleInput) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx,
+		`INSERT INTO titles (tmdb_id, media_type, title, original_title, year, poster_path)
+		 VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT (media_type, tmdb_id) DO UPDATE SET
+		     title = excluded.title, original_title = excluded.original_title,
+		     year = excluded.year, poster_path = excluded.poster_path
+		 RETURNING id`,
+		*t.TMDBID, t.MediaType, t.Title, nullable(t.OriginalTitle), t.Year, t.PosterPath).Scan(&id)
+	return id, err
 }
