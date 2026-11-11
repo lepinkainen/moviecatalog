@@ -13,6 +13,8 @@ export interface Title {
   original_title: string | null;
   year: number | null;
   poster_path: string | null;
+  /** The TMDB collection a movie belongs to, once looked up; "Indiana Jones". */
+  series: { id: number; name: string } | null;
 }
 
 export interface Item {
@@ -174,6 +176,35 @@ export async function identifyItem(id: number): Promise<Item> {
 export async function searchTMDB(query: string, type: 'movie' | 'tv'): Promise<TMDBResult[]> {
   const params = new URLSearchParams({ q: query, type });
   const resp = await check(await fetch(`/api/tmdb/search?${params}`));
+  return resp.json();
+}
+
+/** A TMDB collection with its movies in release order and the discs holding each. */
+export interface Series {
+  id: number;
+  name: string;
+  overview: string;
+  poster_path: string | null;
+  parts: SeriesPart[];
+}
+
+export interface SeriesPart {
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  release_date: string;
+  poster_path: string | null;
+  /** False for an announced movie, which does not count as missing. */
+  released: boolean;
+  /** The library title of an owned movie. */
+  title_id: number | null;
+  copies: { item_id: number; format: string | null; status: string }[];
+  /** On the wishlist. */
+  wanted: boolean;
+}
+
+export async function getSeries(id: number): Promise<Series> {
+  const resp = await check(await fetch(`/api/series/${id}`));
   return resp.json();
 }
 

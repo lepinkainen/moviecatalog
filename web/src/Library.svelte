@@ -11,6 +11,7 @@
     type Item,
     type Title,
   } from './api';
+  import SeriesList from './SeriesList.svelte';
 
   /**
    * selected: the title id from the URL whose discs are shown in the side panel.
@@ -24,6 +25,7 @@
     /** Every title id in the group; hand-typed titles get a new id per item. */
     ids: number[];
     title: Title;
+    /** The series name for a movie in one, so a series files together: Raiders under I. */
     sortTitle: string;
     best: string | null;
     items: Item[];
@@ -80,10 +82,11 @@
     return kept.length > 0 ? kept : words;
   }
 
-  // Every term must appear in the title or original title. A year-like term
-  // also matches the release year give or take one, since listings disagree.
+  // Every term must appear in the title, original title or series name. A
+  // year-like term also matches the release year give or take one, since
+  // listings disagree.
   function matches(t: Title, terms: string[]): boolean {
-    const text = ` ${normalize(t.title)} ${normalize(t.original_title ?? '')} `;
+    const text = ` ${normalize(t.title)} ${normalize(t.original_title ?? '')} ${normalize(t.series?.name ?? '')} `;
     // "spiderman" should find "Spider-Man".
     const compact = text.replaceAll(' ', '');
     return terms.every((term) => {
@@ -110,7 +113,7 @@
             key: k,
             ids: [],
             title: t,
-            sortTitle: sortTitle(t.title),
+            sortTitle: sortTitle(t.series?.name ?? t.title),
             best: null,
             items: [],
             unconfirmed: true,
@@ -145,7 +148,12 @@
       if (format !== 'all' && e.best !== format) return false;
       return terms.length === 0 || matches(e.title, terms);
     });
-    const byTitle = (a: Entry, b: Entry) => a.sortTitle.localeCompare(b.sortTitle, undefined, { sensitivity: 'base' });
+    const compare = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+    // A series in release order, then by name.
+    const byTitle = (a: Entry, b: Entry) =>
+      compare(a.sortTitle, b.sortTitle) ||
+      (a.title.series && b.title.series ? (a.title.year ?? 9999) - (b.title.year ?? 9999) : 0) ||
+      compare(a.title.title, b.title.title);
     switch (sort) {
       case 'title':
         return list.sort(byTitle);
@@ -205,6 +213,12 @@
       if (typing) target.blur();
       else if (selected !== null) close();
     }
+  }
+
+  // The series name, unless the title already says it ("Indiana Jones and the Temple of Doom").
+  function seriesLabel(t: Title): string | null {
+    if (!t.series) return null;
+    return ` ${normalize(t.title)} `.includes(` ${normalize(t.series.name)} `) ? null : t.series.name;
   }
 
   function tmdbURL(t: Title): string | null {
@@ -291,6 +305,7 @@
                 {/if}
               </span>
               <span class="name">{entry.title.title}</span>
+              {#if seriesLabel(entry.title)}<span class="series">{seriesLabel(entry.title)}</span>{/if}
               <span class="meta">
                 {entry.title.year ?? '—'}
                 {#if entry.title.media_type === 'tv'}· series{/if}
@@ -332,6 +347,10 @@
           Best owned: <strong>{current.best ?? 'unknown format'}</strong>
           {#if current.unconfirmed}<span class="review">· still in review</span>{/if}
         </p>
+
+        {#if t.series}
+          <SeriesList id={t.series.id} current={t.tmdb_id ? [t.tmdb_id] : []} />
+        {/if}
 
         <h3>On {current.items.length} disc{current.items.length === 1 ? '' : 's'}</h3>
         <ul class="discs">
@@ -529,9 +548,14 @@
     overflow-wrap: anywhere;
   }
 
-  .meta {
+  .meta,
+  .series {
     font-size: 0.85rem;
     color: var(--muted);
+  }
+
+  .series {
+    overflow-wrap: anywhere;
   }
 
   .review,

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getItem, listRuns, statusLabel, thumb, type Item, type Run } from './api';
   import ReviewPanel from './ReviewPanel.svelte';
+  import SeriesList from './SeriesList.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -47,6 +48,16 @@
   function usd(n: number): string {
     return `$${n.toFixed(4)}`;
   }
+
+  // Each series once, even on a box set of the whole series, with the movies on this disc.
+  const series = $derived.by(() => {
+    const onDisc = new Map<number, number[]>();
+    for (const t of item?.titles ?? []) {
+      if (!t.series || !t.tmdb_id) continue;
+      onDisc.set(t.series.id, [...(onDisc.get(t.series.id) ?? []), t.tmdb_id]);
+    }
+    return [...onDisc].map(([id, current]) => ({ id, current }));
+  });
 
   function tmdbURL(mediaType: string, tmdbID: number): string {
     return `https://www.themoviedb.org/${mediaType}/${tmdbID}`;
@@ -105,12 +116,21 @@
             {:else}
               <span class="review">no TMDB match</span>
             {/if}
+            {#if t.series}
+              · <a href="#/library?q={encodeURIComponent(t.series.name)}">{t.series.name}</a>
+            {/if}
           </div>
         {:else}
           —
         {/each}
       </dd>
     </dl>
+
+    {#each series as s (s.id)}
+      <div class="panel">
+        <SeriesList id={s.id} current={s.current} />
+      </div>
+    {/each}
 
     <!-- Recreated whenever the stored item changes, so the form never shows stale values. -->
     {#key `${item.status}|${item.format}|${item.notes}|${item.titles.map((t) => t.id).join(',')}`}
@@ -225,6 +245,12 @@
 
   dt {
     color: var(--muted);
+  }
+
+  .panel {
+    padding: 1rem;
+    background: var(--surface);
+    border-radius: 0.75rem;
   }
 
   dd {
