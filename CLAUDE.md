@@ -16,7 +16,7 @@ Tasks run through `task` (Taskfile.yml). Tools like `air` are pinned in `mise.to
 - `task web-dev`: Vite dev server on the LAN that proxies `/api` to :8080, so the phone gets live reload
 - Single test: `go test ./internal/identify -run TestIdentifyExactMatch`
 
-Runtime config comes from environment variables: `OPENAI_API_KEY`, `TMDB_API_KEY`, `OPENAI_MODEL`, `MOVIECATALOG_ADDR` (default `:8080`), `MOVIECATALOG_DATA_DIR` (default `data`) `WATCHER_URL` (cdon-watcher's base URL, for wishlist offers) and `WATCHER_DB` (development fallback: cdon-watcher's SQLite file, opened read-only, e.g. `../cdon-watcher/data/catalog.db`; ignored when `WATCHER_URL` is set). Identification only runs when both API keys are set. Without them, captures are still stored. Without `TMDB_API_KEY`, the manual TMDB search returns 503. Without either watcher setting, the wishlist works without shop offers.
+Runtime config comes from environment variables: `OPENAI_API_KEY`, `TMDB_API_KEY`, `OPENAI_MODEL`, `MOVIECATALOG_ADDR` (default `:8080`), `MOVIECATALOG_DATA_DIR` (default `data`) `WATCHER_URL` (cdon-watcher's base URL, for wishlist offers) and `WATCHER_DB` (development fallback: cdon-watcher's SQLite file, opened read-only, e.g. `../cdon-watcher/data/catalog.db`; ignored when `WATCHER_URL` is set). Identification only runs when both API keys are set. Without them, captures are still stored. Without `TMDB_API_KEY`, the manual TMDB search and `GET /api/series/{id}` return 503, and series are not looked up. Without either watcher setting, the wishlist works without shop offers.
 
 LLM cost estimates use `model_prices_and_context_window.json` (LiteLLM's price list), embedded by `main.go`. It is updated by hand. `TestDefaultModelIsPriced` fails if the default model drops out of it.
 
@@ -36,6 +36,8 @@ The core rule is "capture now, identify later". Capture only stores evidence. Id
   3. TMDB search per title, with the LLM's `Pick` asked to choose only when the matches are ambiguous
 
   Every step's raw request and response is written to `identification_runs`, which feeds the item log in the UI.
+
+  `SeriesFinder` (`identify/series.go`) is a second background loop that needs only `TMDB_API_KEY`. It fills `titles.collection_id`/`collection_name` from TMDB's `belongs_to_collection` for every matched movie with no `details_checked_at`, whichever path saved it. The worker (`OnSaved`) and the server (`OnTitlesSaved`) wake it. `GET /api/series/{id}` (`server/series.go`) returns a collection's movies in release order with the discs holding each and whether each is on the wishlist, caching TMDB's answer (not the ownership or wishes) in memory for a day.
 - **Concurrency and retry rules** (spread across `db/identification.go`, `db/review.go` and `identify/worker.go`):
   - `items.revision` is bumped by manual edits (`ApplyReview`) and by re-queueing (`ResetForIdentification`). The worker's `SaveIdentification`, `SaveCheckpoint` and `RecordFailure` only apply if the revision and the `captured` status are unchanged since pickup. Otherwise they return `db.ErrStale`, and the worker discards its result.
   - `items.checkpoint` caches the barcode and vision result, so a retry after a TMDB failure doesn't repeat the paid vision call. Re-queueing clears it.
@@ -47,6 +49,6 @@ The core rule is "capture now, identify later". Capture only stores evidence. Id
 - **`internal/server`**: `net/http` ServeMux JSON API under `/api`. It also serves photos (immutable cache headers, thumbnails generated on demand into the data directory) and the embedded SPA.
 - **Frontend (`web/`)**: Svelte 5 (runes) + TypeScript + Vite.
   - The build writes to `internal/webui/dist`, which `internal/webui` embeds into the binary. The Go build serves an explanatory 503 page when it's missing.
-  - Hash-routed SPA (`App.svelte`): Capture and Catalogue (phone first), item detail with `ReviewPanel`, `Library` (desktop first: a poster grid per title, built client-side from `GET /api/items`) and `Wishlist` (`WantRow` per wish). All fetch calls and types live in `api.ts`.
+  - Hash-routed SPA (`App.svelte`): Capture and Catalogue (phone first), item detail with `ReviewPanel`, `Library` (desktop first: a poster grid per title, built client-side from `GET /api/items`; the title sort files a series under its name) and `Wishlist` (`WantRow` per wish). `SeriesList` shows a series in both the item detail and the library panel, with a + to wish for a missing movie. All fetch calls and types live in `api.ts`.
   - Capture stays mounted while hidden, so unsaved photos survive navigation.
   - Capture uses `<input type="file" capture="environment">` rather than `getUserMedia`, so it works on the LAN without HTTPS.

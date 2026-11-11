@@ -151,6 +151,20 @@ this?" while looking at a disc sale in another tab.
 - Filters: best format, movies or series. Sort: title (ignoring a leading
   "The"/"A"/"An"), year, recently added.
 - Selecting a card lists the discs that hold it, each linking to the item detail.
+- **Series.** A movie in a TMDB collection belongs to that series ("Indiana Jones
+  Collection" → "Indiana Jones"). The title sort files a series under its name in
+  release order, so *Raiders of the Lost Ark* sits with the other Indiana Jones
+  movies; a card shows the series name when the title doesn't say it; search
+  matches the series name. The library panel and the item detail list the whole
+  series ("4 of 5 owned"), with announced movies marked as upcoming rather than
+  missing. A movie that isn't owned shows "on wishlist", or a small + that adds
+  it to the wishlist with the default formats and no price cap.
+  - The collection is looked up in the background (`GET /movie/{id}`) for every
+    matched movie, however it was saved, including titles saved before series
+    existed. TMDB's collections are curated by its users, so coverage is uneven,
+    and a movie is in at most one. TV series have none.
+  - Not yet: a series set by hand for what TMDB doesn't group (the MCU, "Studio
+    Ghibli"), overriding the collection.
 
 ## Wishlist and offers (phase 2)
 
@@ -210,9 +224,10 @@ wishlist, not browsing.
 - **Price cap** (optional, euros): the most I'd pay. Without one, any price is shown
   but nothing is called a deal.
 - **Notes**: free text.
-- Wishes are added from a TMDB search on the wishlist page. When the title is
-  already owned, the page says in which format(s), so it's clear whether the
-  wish is an upgrade or a mistake.
+- Wishes are added from a TMDB search on the wishlist page, or with the + on a
+  missing movie in a series list (library panel, item detail). When the title is
+  already owned, the wishlist page says in which format(s), so it's clear whether
+  the wish is an upgrade or a mistake.
 - A wish stays after the disc is bought. Removing it is a manual step. (Later:
   offer to remove it when a captured disc matches.)
 
@@ -313,10 +328,11 @@ the watcher's schema, and needs both processes on the same machine.
 
 - Notifications (push, email) when a deal appears.
 - Price history charts. The watcher has the data, and its product page can be linked.
-- Gaps: suggesting wishes from TMDB collections and studios
-  ("4 of 5 Lethal Weapons", "22 of 33 Pixar features").
+- Gaps for studios ("22 of 33 Pixar features"). Series already show what is
+  missing and can be wished for from there; an overview of every incomplete
+  series is still to do.
 - Capturing a wish with the phone camera, through the identification pipeline.
-- Showing "on the wishlist" in the library.
+- Showing "on the wishlist" on library cards (series lists already show it).
 
 ## Build order
 
