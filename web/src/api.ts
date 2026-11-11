@@ -186,3 +186,104 @@ export function duplicateIds(item: Item): number[] {
 export async function deleteItem(id: number): Promise<void> {
   await check(await fetch(`/api/items/${id}`, { method: 'DELETE' }));
 }
+
+/** Formats a wish can accept: the ones the shop watcher tracks. */
+export const WANT_FORMATS = ['Blu-ray', 'UHD'] as const;
+
+/** A shop listing for a wished-for movie, from cdon-watcher. */
+export interface Offer {
+  store_key: string;
+  store: string;
+  title: string;
+  format: string;
+  condition: string;
+  price_cents: number;
+  /** Set when the listing shows a discount. */
+  regular_price_cents: number | null;
+  currency: string;
+  /** Only in_stock can be a deal. Kept open to values added later. */
+  availability: 'in_stock' | 'supplier_order' | 'preorder' | 'out_of_stock' | 'unknown' | (string & {});
+  url: string;
+  image_url: string | null;
+  seen_at: string;
+  /** The watcher's price history page for the listing, when known. */
+  history_url: string | null;
+  /** In stock and within the wish's price cap. */
+  deal: boolean;
+}
+
+export interface Want {
+  id: number;
+  title: Title;
+  formats: string[];
+  max_price_cents: number | null;
+  notes: string;
+  created_at: string;
+  /** Formats of the discs already holding this title. */
+  owned_formats: string[];
+  /** Null when offers could not be looked up. */
+  offers: Offer[] | null;
+  /** When the watcher last searched the shops for it; see Wishlist.offers.searches. */
+  searched_at: string | null;
+}
+
+export interface Wishlist {
+  wants: Want[];
+  offers: {
+    configured: boolean;
+    /** Whether searched_at is known; without it an empty result may just mean "not searched yet". */
+    searches: boolean;
+    error: string | null;
+  };
+}
+
+export interface WantEdit {
+  formats: string[];
+  max_price_cents: number | null;
+  notes: string;
+}
+
+export async function listWants(): Promise<Wishlist> {
+  const resp = await check(await fetch('/api/wants'));
+  return resp.json();
+}
+
+export async function createWant(title: TitleEdit, edit?: WantEdit): Promise<Want> {
+  const resp = await check(
+    await fetch('/api/wants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: titleEdit(title), ...edit }),
+    }),
+  );
+  return resp.json();
+}
+
+export async function updateWant(id: number, edit: WantEdit): Promise<Want> {
+  const resp = await check(
+    await fetch(`/api/wants/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(edit),
+    }),
+  );
+  return resp.json();
+}
+
+export async function deleteWant(id: number): Promise<void> {
+  await check(await fetch(`/api/wants/${id}`, { method: 'DELETE' }));
+}
+
+/** "5 min ago", "3 h ago", "2 days ago". */
+export function ago(iso: string, now = Date.now()): string {
+  const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+/** "12,99 €" style, as the shops show it. */
+export function euros(cents: number): string {
+  return new Intl.NumberFormat('fi-FI', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+}
