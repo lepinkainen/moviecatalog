@@ -7,3 +7,6 @@
 !/internal/webui/dist/.gitkeep
 /.task/
 /tmp/
+
+# 1Password secret references for `task dev-op`; local only.
+/op.env
