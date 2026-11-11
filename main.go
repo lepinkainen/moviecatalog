@@ -99,9 +99,13 @@ func run(log *slog.Logger) error {
 
 	openAIKey, tmdbKey := os.Getenv("OPENAI_API_KEY"), os.Getenv("TMDB_API_KEY")
 	var tmdb *identify.TMDB
+	var series *identify.SeriesFinder
 	if tmdbKey != "" {
 		tmdb = &identify.TMDB{APIKey: tmdbKey, HTTP: &http.Client{Timeout: 30 * time.Second}}
 		srv.SetTMDB(tmdb)
+		series = identify.NewSeriesFinder(store, tmdb, log)
+		srv.OnTitlesSaved(series.Notify)
+		go series.Run(ctx)
 	}
 	if openAIKey != "" && tmdb != nil {
 		llm := &identify.OpenAI{
@@ -115,6 +119,7 @@ func run(log *slog.Logger) error {
 		}
 		llm.Price = price
 		worker := identify.NewWorker(store, dataDir, llm, tmdb, log)
+		worker.OnSaved = series.Notify
 		srv.OnPending(worker.Notify)
 		go worker.Run(ctx)
 		if price != nil {

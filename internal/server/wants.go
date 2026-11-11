@@ -165,6 +165,7 @@ func (s *Server) handleCreateWant(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "could not add the wish")
 		return
 	}
+	s.titlesSaved()
 	s.writeJSON(w, http.StatusCreated, want)
 }
 

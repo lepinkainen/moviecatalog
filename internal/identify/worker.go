@@ -32,6 +32,8 @@ type Worker struct {
 	tmdb    *TMDB
 	log     *slog.Logger
 	wake    chan struct{}
+	// OnSaved, when set, is called after an identification has been saved.
+	OnSaved func()
 }
 
 // NewWorker creates a worker reading photos from dataDir.
@@ -180,7 +182,13 @@ func (w *Worker) process(ctx context.Context, item *db.Item) error {
 	}
 	ident.Notes = strings.Join(notes, "; ")
 
-	return w.store.SaveIdentification(ctx, item.ID, item.Revision, ident)
+	if err := w.store.SaveIdentification(ctx, item.ID, item.Revision, ident); err != nil {
+		return err
+	}
+	if w.OnSaved != nil {
+		w.OnSaved()
+	}
+	return nil
 }
 
 // readPhotos runs the barcode and LLM steps, or returns their stored result

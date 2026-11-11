@@ -62,6 +62,8 @@ type Title struct {
 	OriginalTitle *string `json:"original_title"`
 	Year          *int    `json:"year"`
 	PosterPath    *string `json:"poster_path"`
+	// Series is the TMDB collection the movie belongs to, once it has been looked up.
+	Series *Series `json:"series"`
 }
 
 // Image is a stored photo of an item.
@@ -253,7 +255,8 @@ func (s *Store) queryImages(ctx context.Context, clause string, args ...any) ([]
 
 func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]Title, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT t.id, it.item_id, t.tmdb_id, t.media_type, t.title, t.original_title, t.year, t.poster_path
+		`SELECT t.id, it.item_id, t.tmdb_id, t.media_type, t.title, t.original_title, t.year, t.poster_path,
+		        t.collection_id, t.collection_name
 		   FROM item_titles it JOIN titles t ON t.id = it.title_id `+clause, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query titles: %w", err)
@@ -263,8 +266,14 @@ func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]
 	var titles []Title
 	for rows.Next() {
 		var t Title
-		if err := rows.Scan(&t.ID, &t.ItemID, &t.TMDBID, &t.MediaType, &t.Title, &t.OriginalTitle, &t.Year, &t.PosterPath); err != nil {
+		var collectionID *int64
+		var collectionName *string
+		if err := rows.Scan(&t.ID, &t.ItemID, &t.TMDBID, &t.MediaType, &t.Title, &t.OriginalTitle, &t.Year, &t.PosterPath,
+			&collectionID, &collectionName); err != nil {
 			return nil, fmt.Errorf("query titles: %w", err)
+		}
+		if collectionID != nil && collectionName != nil {
+			t.Series = &Series{ID: *collectionID, Name: SeriesName(*collectionName)}
 		}
 		titles = append(titles, t)
 	}

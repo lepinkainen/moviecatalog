@@ -39,10 +39,14 @@ type Server struct {
 	log     *slog.Logger
 	// notify is called when items are waiting for identification.
 	notify func()
+	// onTitles is called when titles may have been added to the catalogue.
+	onTitles func()
 	// tmdb backs the manual title search; nil when no API key is configured.
 	tmdb *identify.TMDB
 	// offers backs the shop prices on the wishlist; nil when not configured.
 	offers offers.Source
+	// series caches the TMDB collections shown for a series.
+	series seriesCache
 }
 
 // OnPending registers fn to be called whenever items are waiting for identification.
@@ -53,6 +57,18 @@ func (s *Server) OnPending(fn func()) {
 func (s *Server) pending() {
 	if s.notify != nil {
 		s.notify()
+	}
+}
+
+// OnTitlesSaved registers fn to be called whenever titles may have been added
+// by hand or to the wishlist.
+func (s *Server) OnTitlesSaved(fn func()) {
+	s.onTitles = fn
+}
+
+func (s *Server) titlesSaved() {
+	if s.onTitles != nil {
+		s.onTitles()
 	}
 }
 
@@ -81,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/wants/{id}", s.handleUpdateWant)
 	mux.HandleFunc("DELETE /api/wants/{id}", s.handleDeleteWant)
 	mux.HandleFunc("GET /api/sync", s.handleSync)
+	mux.HandleFunc("GET /api/series/{id}", s.handleGetSeries)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
 	})

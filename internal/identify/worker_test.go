@@ -40,6 +40,10 @@ type fakes struct {
 	onIdentify func()
 	// tmdbStatus makes TMDB searches fail with this HTTP status when set.
 	tmdbStatus int
+	// collections maps a TMDB movie id to its belongs_to_collection value;
+	// movies not in it are not found. movieStatus fails the lookup when set.
+	collections map[string]any
+	movieStatus int
 }
 
 func (f *fakes) handler() http.Handler {
@@ -97,6 +101,18 @@ func (f *fakes) handler() http.Handler {
 		year := q.Get("year") + q.Get("first_air_date_year")
 		key := r.PathValue("kind") + "|" + q.Get("query") + "|" + year
 		json.NewEncoder(w).Encode(map[string]any{"results": f.results[key]})
+	})
+	mux.HandleFunc("GET /movie/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if f.movieStatus != 0 {
+			http.Error(w, `{"status_message":"boom"}`, f.movieStatus)
+			return
+		}
+		collection, ok := f.collections[r.PathValue("id")]
+		if !ok {
+			http.Error(w, `{"status_message":"not found"}`, http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": r.PathValue("id"), "belongs_to_collection": collection})
 	})
 	return mux
 }

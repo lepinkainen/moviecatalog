@@ -81,6 +81,9 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "could not update item")
 		return
 	}
+	if edit.Titles != nil {
+		s.titlesSaved()
+	}
 	s.handleGetItem(w, r)
 }
 
