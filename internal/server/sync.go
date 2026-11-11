@@ -39,7 +39,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := syncResponse{Owned: owned, Wanted: []wantedMovie{}}
 	for _, want := range wants {
-		if want.Title.MediaType != db.MediaMovie {
+		if want.Title.MediaType != db.MediaMovie || want.CollectedOn != nil {
 			continue
 		}
 		resp.Wanted = append(resp.Wanted, wantedMovie{

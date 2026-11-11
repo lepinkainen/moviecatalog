@@ -20,7 +20,8 @@ type ItemEdit struct {
 
 // ApplyReview stores a manual correction and marks the item as identified:
 // a person has looked at it, so nothing is left to review. An empty edit
-// simply approves the item as it stands.
+// simply approves the item as it stands. The wishes for its titles are
+// collected (see collectWants).
 func (s *Store) ApplyReview(ctx context.Context, itemID int64, edit ItemEdit) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -56,6 +57,9 @@ func (s *Store) ApplyReview(ctx context.Context, itemID int64, edit ItemEdit) er
 		`UPDATE items SET status = ?, review_reason = NULL, revision = revision + 1 WHERE id = ?`,
 		StatusIdentified, itemID); err != nil {
 		return fmt.Errorf("mark reviewed: %w", err)
+	}
+	if err := collectWants(ctx, tx, itemID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

@@ -58,7 +58,7 @@ func (s *Server) handleListWants(w http.ResponseWriter, r *http.Request) {
 		resp.Offers.Searches = s.offers.TracksSearches()
 		var ids []int64
 		for _, want := range wants {
-			if want.Title.MediaType == db.MediaMovie {
+			if want.Title.MediaType == db.MediaMovie && want.CollectedOn == nil {
 				ids = append(ids, *want.Title.TMDBID)
 			}
 		}
@@ -73,7 +73,10 @@ func (s *Server) handleListWants(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, want := range wants {
 		view := wantView{Want: want}
-		if found != nil {
+		if want.CollectedOn != nil {
+			// Bought: the shops no longer matter.
+			view.Offers = []wantOffer{}
+		} else if found != nil {
 			movie := found[*want.Title.TMDBID]
 			view.Offers = matchingOffers(want, movie.Offers)
 			view.SearchedAt = movie.SearchedAt

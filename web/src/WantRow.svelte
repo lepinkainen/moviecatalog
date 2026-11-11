@@ -31,6 +31,12 @@
   );
   const valid = $derived(formats.length > 0 && !Number.isNaN(capCents) && (capCents === null || capCents > 0));
   const offers = $derived(want.offers ?? []);
+
+  // "2026-11-11" as a local date, without a time zone shift.
+  function day(iso: string): string {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
   const shown = $derived(showAll ? offers : offers.slice(0, FIRST_OFFERS));
 
   function toggle(format: string) {
@@ -91,45 +97,54 @@
       {#if want.owned_formats.length > 0}
         <span class="owned" title="Formats already on the shelf">Own: {want.owned_formats.join(', ')}</span>
       {/if}
-      {#if want.title.media_type === 'tv'}
+      {#if want.title.media_type === 'tv' && !want.collected_on}
         <span class="owned">Series: no shop prices</span>
       {/if}
     </div>
 
-    <form
-      class="edit"
-      onsubmit={(e) => {
-        e.preventDefault();
-        if (dirty && valid) save();
-      }}
-    >
-      <span class="group" role="group" aria-label="Accepted formats">
-        {#each WANT_FORMATS as f (f)}
-          <button type="button" aria-pressed={formats.includes(f)} onclick={() => toggle(f)}>{f}</button>
-        {/each}
-      </span>
-      <label class="cap">
-        Max
-        <input
-          bind:value={cap}
-          inputmode="decimal"
-          placeholder="any"
-          aria-invalid={Number.isNaN(capCents)}
-          size="6"
-        />
-        €
-      </label>
-      <input class="notes" bind:value={notes} placeholder="Notes" />
-      {#if dirty}
-        <button class="primary" type="submit" disabled={busy || !valid}>Save</button>
-      {/if}
-      <button class="remove" type="button" onclick={remove} disabled={busy} title="Remove from the wishlist"
-        >Remove</button
+    {#if want.collected_on}
+      <p class="collected">
+        <span class="muted">Collected {day(want.collected_on)}</span>
+        <button class="remove" type="button" onclick={remove} disabled={busy} title="Remove from the wishlist"
+          >Remove</button
+        >
+      </p>
+    {:else}
+      <form
+        class="edit"
+        onsubmit={(e) => {
+          e.preventDefault();
+          if (dirty && valid) save();
+        }}
       >
-    </form>
+        <span class="group" role="group" aria-label="Accepted formats">
+          {#each WANT_FORMATS as f (f)}
+            <button type="button" aria-pressed={formats.includes(f)} onclick={() => toggle(f)}>{f}</button>
+          {/each}
+        </span>
+        <label class="cap">
+          Max
+          <input
+            bind:value={cap}
+            inputmode="decimal"
+            placeholder="any"
+            aria-invalid={Number.isNaN(capCents)}
+            size="6"
+          />
+          €
+        </label>
+        <input class="notes" bind:value={notes} placeholder="Notes" />
+        {#if dirty}
+          <button class="primary" type="submit" disabled={busy || !valid}>Save</button>
+        {/if}
+        <button class="remove" type="button" onclick={remove} disabled={busy} title="Remove from the wishlist"
+          >Remove</button
+        >
+      </form>
+    {/if}
     {#if error}<p class="error">{error}</p>{/if}
 
-    {#if want.offers !== null && want.title.media_type === 'movie'}
+    {#if want.offers !== null && want.title.media_type === 'movie' && !want.collected_on}
       {#if offers.length === 0}
         {#if searches && !want.searched_at}
           <p class="muted">Not searched for yet. The shops are searched on the watcher's next refresh.</p>
@@ -222,6 +237,13 @@
   .muted {
     color: var(--muted);
     font-weight: normal;
+  }
+
+  .collected {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0;
   }
 
   .owned,

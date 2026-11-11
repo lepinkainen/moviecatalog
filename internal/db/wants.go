@@ -25,6 +25,9 @@ type Want struct {
 	CreatedAt     time.Time `json:"created_at"`
 	// OwnedFormats are the formats of the discs already holding this title.
 	OwnedFormats []string `json:"owned_formats"`
+	// CollectedOn is the day a captured disc fulfilled the wish (YYYY-MM-DD),
+	// or nil while it is still wanted.
+	CollectedOn *string `json:"collected_on"`
 }
 
 // WantEdit holds the fields of a want that can be changed.
@@ -35,7 +38,8 @@ type WantEdit struct {
 }
 
 // CreateWant adds a title to the wishlist. The title must have a TMDB id.
-// It returns ErrExists when the title is already wished for.
+// It returns ErrExists when the title is already wished for. Wishing again
+// for a collected title (an upgrade, say) makes its wish a new one.
 func (s *Store) CreateWant(ctx context.Context, title TitleInput, edit WantEdit, now time.Time) (*Want, error) {
 	if title.TMDBID == nil {
 		return nil, errors.New("a wanted title needs a TMDB id")
@@ -54,7 +58,10 @@ func (s *Store) CreateWant(ctx context.Context, title TitleInput, edit WantEdit,
 	err = tx.QueryRowContext(ctx,
 		`INSERT INTO wants (title_id, formats, max_price_cents, notes, created_at)
 		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT (title_id) DO NOTHING
+		 ON CONFLICT (title_id) DO UPDATE SET
+		     formats = excluded.formats, max_price_cents = excluded.max_price_cents,
+		     notes = excluded.notes, created_at = excluded.created_at, collected_on = NULL
+		   WHERE wants.collected_on IS NOT NULL
 		 RETURNING id`,
 		titleID, strings.Join(edit.Formats, ","), edit.MaxPriceCents, edit.Notes,
 		now.UTC().Format(time.RFC3339)).Scan(&id)
@@ -108,7 +115,7 @@ func (s *Store) GetWant(ctx context.Context, id int64) (*Want, error) {
 	return wants[0], nil
 }
 
-// ListWants returns the whole wishlist, newest first.
+// ListWants returns the whole wishlist, newest first, collected wishes included.
 func (s *Store) ListWants(ctx context.Context) ([]*Want, error) {
 	return s.queryWants(ctx, `ORDER BY w.id DESC`)
 }
@@ -116,7 +123,7 @@ func (s *Store) ListWants(ctx context.Context) ([]*Want, error) {
 func (s *Store) queryWants(ctx context.Context, clause string, args ...any) ([]*Want, error) {
 	// Discs still waiting for identification have no format yet and are left out.
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT w.id, w.formats, w.max_price_cents, w.notes, w.created_at,
+		`SELECT w.id, w.formats, w.max_price_cents, w.notes, w.created_at, w.collected_on,
 		        t.id, t.tmdb_id, t.media_type, t.title, t.original_title, t.year, t.poster_path,
 		        (SELECT group_concat(DISTINCT i.format)
 		           FROM item_titles it JOIN items i ON i.id = it.item_id
@@ -132,7 +139,7 @@ func (s *Store) queryWants(ctx context.Context, clause string, args ...any) ([]*
 		var w Want
 		var formats, createdAt string
 		var owned sql.NullString
-		if err := rows.Scan(&w.ID, &formats, &w.MaxPriceCents, &w.Notes, &createdAt,
+		if err := rows.Scan(&w.ID, &formats, &w.MaxPriceCents, &w.Notes, &createdAt, &w.CollectedOn,
 			&w.Title.ID, &w.Title.TMDBID, &w.Title.MediaType, &w.Title.Title, &w.Title.OriginalTitle,
 			&w.Title.Year, &w.Title.PosterPath, &owned); err != nil {
 			return nil, fmt.Errorf("query wants: %w", err)
@@ -157,4 +164,21 @@ func splitList(s string) []string {
 		return []string{}
 	}
 	return strings.Split(s, ",")
+}
+
+// collectWants marks the wishes for the titles on an identified item as
+// collected on the day the disc was captured: buying the disc fulfils them,
+// whatever its format. Only wishes made before the disc was captured count, so
+// a later wish (an upgrade of a disc already owned) survives edits to, or
+// re-identification of, the old disc.
+func collectWants(ctx context.Context, tx *sql.Tx, itemID int64) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE wants SET collected_on = (SELECT date(captured_at, 'localtime') FROM items WHERE id = ?)
+		  WHERE collected_on IS NULL
+		    AND title_id IN (SELECT title_id FROM item_titles WHERE item_id = ?)
+		    AND created_at <= (SELECT captured_at FROM items WHERE id = ?)`, itemID, itemID, itemID)
+	if err != nil {
+		return fmt.Errorf("collect wants: %w", err)
+	}
+	return nil
 }

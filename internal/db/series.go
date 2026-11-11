@@ -113,7 +113,8 @@ func (s *Store) OwnedCopies(ctx context.Context, tmdbIDs []int64) ([]OwnedCopy, 
 	return copies, nil
 }
 
-// WantedMovies returns which of the given TMDB movies are on the wishlist.
+// WantedMovies returns which of the given TMDB movies are on the wishlist and
+// not yet collected.
 func (s *Store) WantedMovies(ctx context.Context, tmdbIDs []int64) (map[int64]bool, error) {
 	wanted := map[int64]bool{}
 	if len(tmdbIDs) == 0 {
@@ -125,7 +126,7 @@ func (s *Store) WantedMovies(ctx context.Context, tmdbIDs []int64) (map[int64]bo
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT t.tmdb_id FROM wants w JOIN titles t ON t.id = w.title_id
-		  WHERE t.media_type = ? AND t.tmdb_id IN (?`+strings.Repeat(", ?", len(tmdbIDs)-1)+`)`, args...)
+		  WHERE w.collected_on IS NULL AND t.media_type = ? AND t.tmdb_id IN (?`+strings.Repeat(", ?", len(tmdbIDs)-1)+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("wanted movies: %w", err)
 	}

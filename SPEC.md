@@ -224,12 +224,23 @@ wishlist, not browsing.
 - **Price cap** (optional, euros): the most I'd pay. Without one, any price is shown
   but nothing is called a deal.
 - **Notes**: free text.
+- **Collected on**: the day a captured disc fulfilled the wish (see below).
 - Wishes are added from a TMDB search on the wishlist page, or with the + on a
   missing movie in a series list (library panel, item detail). When the title is
   already owned, the wishlist page says in which format(s), so it's clear whether
   the wish is an upgrade or a mistake.
-- A wish stays after the disc is bought. Removing it is a manual step. (Later:
-  offer to remove it when a captured disc matches.)
+- **Buying the disc fulfils the wish.** When a captured disc is identified as a
+  wished-for title, the wish is marked collected on the day the disc was
+  captured, whatever its format: I know what I'm buying, so there is no prompt.
+  Nothing is deleted. A collected wish is kept as a record in a "Collected"
+  group at the end of the wishlist, and no longer counts as wanted: no offers,
+  not sent to the watcher, not "on wishlist" in series lists.
+  - A disc that goes to review leaves the wish open until it is approved, since
+    the match may be wrong.
+  - Only wishes made before the disc was captured are collected, so an upgrade
+    wished for later (UHD of a DVD I own) survives edits to, or
+    re-identification of, the old disc.
+  - Wishing again for a collected title reopens it as a new wish.
 
 ### Offers
 

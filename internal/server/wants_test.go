@@ -286,3 +286,33 @@ func TestOnlyInStockIsADeal(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectedWish(t *testing.T) {
+	src := &fakeOffers{movies: map[int64]offers.Movie{}}
+	ts, store := newWishlistServer(t, src)
+	ctx := context.Background()
+	if resp := send(t, http.MethodPost, ts.URL+"/api/wants", `{"title": `+upTitle+`}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: status = %d", resp.StatusCode)
+	}
+	// Captured after the wish (or within the same second), so the disc fulfils it.
+	item, err := store.CreateItem(ctx, time.Now(), func(int64) ([]db.NewImage, error) { return nil, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, dvd := int64(14160), "DVD"
+	titles := []db.TitleInput{{TMDBID: &up, MediaType: db.MediaMovie, Title: "Up"}}
+	if err := store.ApplyReview(ctx, item.ID, db.ItemEdit{Format: &dvd, Titles: &titles}); err != nil {
+		t.Fatal(err)
+	}
+
+	list := decode[wishlistResponse](t, get(t, ts.URL+"/api/wants"))
+	if len(list.Wants) != 1 || list.Wants[0].CollectedOn == nil || *list.Wants[0].CollectedOn != time.Now().Format(time.DateOnly) {
+		t.Fatalf("wants = %+v, want Up collected today", list.Wants)
+	}
+	if list.Wants[0].Offers == nil || len(list.Wants[0].Offers) != 0 || len(src.asked) != 0 {
+		t.Errorf("offers = %v, asked = %v; want no shop lookup for a collected wish", list.Wants[0].Offers, src.asked)
+	}
+	if got := decode[syncResponse](t, get(t, ts.URL+"/api/sync")); len(got.Wanted) != 0 || len(got.Owned) != 1 {
+		t.Errorf("sync = %+v, want Up owned and not wanted", got)
+	}
+}

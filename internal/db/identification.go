@@ -114,7 +114,8 @@ func updateCurrent(ctx context.Context, exec interface {
 // SaveIdentification replaces the identification of an item that the worker
 // picked up at the given revision. Items that look like a copy of another
 // item (same barcode, or same titles in the same format) are sent to review
-// along with anything listed in ReviewReasons.
+// along with anything listed in ReviewReasons. An item that needs no review
+// collects the wishes for its titles (see collectWants).
 func (s *Store) SaveIdentification(ctx context.Context, itemID, revision int64, ident Identification) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -156,6 +157,12 @@ func (s *Store) SaveIdentification(ctx context.Context, itemID, revision int64, 
 		`UPDATE items SET status = ?, review_reason = ? WHERE id = ?`,
 		status, nullable(strings.Join(reasons, "; ")), itemID); err != nil {
 		return fmt.Errorf("update item: %w", err)
+	}
+	// An item in review may be misidentified; its wishes are collected when it is approved.
+	if status == StatusIdentified {
+		if err := collectWants(ctx, tx, itemID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

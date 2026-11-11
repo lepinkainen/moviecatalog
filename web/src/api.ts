@@ -256,6 +256,8 @@ export interface Want {
   offers: Offer[] | null;
   /** When the watcher last searched the shops for it; see Wishlist.offers.searches. */
   searched_at: string | null;
+  /** The day a captured disc fulfilled the wish (YYYY-MM-DD); null while still wanted. */
+  collected_on: string | null;
 }
 
 export interface Wishlist {

@@ -28,22 +28,31 @@
   onMount(load);
 
   const wished = $derived(
-    new Set((wishlist?.wants ?? []).map((w) => `${w.title.media_type}:${w.title.tmdb_id}`)),
+    // A collected title can be wished for again (an upgrade).
+    new Set(
+      (wishlist?.wants ?? []).filter((w) => !w.collected_on).map((w) => `${w.title.media_type}:${w.title.tmdb_id}`),
+    ),
   );
 
   // Wishes with a deal first, then ones any shop has, then the rest; newest first
   // within each (the server sends newest first and the sort is stable).
+  // Collected wishes last, most recently collected first.
   function rank(w: Want): number {
+    if (w.collected_on) return 3;
     if (w.offers?.some((o) => o.deal)) return 0;
     if (w.offers?.length) return 1;
     return 2;
   }
   const sections = $derived.by(() => {
     const wants = wishlist?.wants ?? [];
+    const collected = wants
+      .filter((w) => rank(w) === 3)
+      .sort((a, b) => (b.collected_on ?? '').localeCompare(a.collected_on ?? ''));
     return [
       { label: 'Deals', wants: wants.filter((w) => rank(w) === 0) },
       { label: 'In shops', wants: wants.filter((w) => rank(w) === 1) },
       { label: 'Not in shops', wants: wants.filter((w) => rank(w) === 2) },
+      { label: 'Collected', wants: collected },
     ].filter((s) => s.wants.length > 0);
   });
 
@@ -75,7 +84,7 @@
   }
 
   // A row's form starts from the stored wish; recreate it when that changes.
-  const rowKey = (w: Want) => `${w.id}:${w.formats.join()}:${w.max_price_cents}:${w.notes}`;
+  const rowKey = (w: Want) => `${w.id}:${w.formats.join()}:${w.max_price_cents}:${w.notes}:${w.collected_on}`;
 </script>
 
 <div class="page">
