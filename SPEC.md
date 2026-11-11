@@ -1,10 +1,12 @@
-# Movie Catalog — Phase 1 Spec (draft 4)
+# Movie Catalog — Spec (draft 5)
 
 A personal catalogue of ~500 physical discs (DVD, Blu-ray, UHD). Phase 1 is about
 getting the collection digitised with as little effort per disc as possible.
 A real UI comes later.
 
 The question the catalogue answers: **do I own this movie, and in what quality?**
+Phase 2 adds a second one: **what do I want, and is it on sale anywhere?** (see
+[Wishlist and offers](#wishlist-and-offers-phase-2)).
 
 ## Goals
 
@@ -19,8 +21,8 @@ The question the catalogue answers: **do I own this movie, and in what quality?*
 - Statistics, and browsing beyond the library view below.
 - Edition tracking: steelbooks, cuts, regions, audio/subtitle languages.
 - Barcode lookup services. The barcode is stored, not looked up.
-- Loans, wishlist, watch history, ratings.
-- Multi-user, auth beyond "it's on my home network".
+- Loans, watch history, ratings.
+- Multi-user, auth beyond "it's on my home network" (later: "it's on my tailnet").
 - Ripping or reading the discs themselves.
 
 ## Decisions so far
@@ -110,6 +112,8 @@ model missing from it is still used, but its cost is not estimated.
 - **item_title** — many-to-many; a box set is one item with several titles,
   and the same movie on DVD and Blu-ray is two items with one title.
 - **identification_run** — item id, step, raw request/response, model, timestamp.
+- **want** — a wishlist entry (phase 2): title id, accepted formats, optional
+  price cap, notes, added_at. See below.
 
 "Best quality owned" for a title is derived: the highest format among its items.
 
@@ -118,10 +122,10 @@ model missing from it is still used, but its cost is not estimated.
 - **Go server**: JSON API under `/api`, image upload and serving, background
   identification worker (in-process, driven by item status in SQLite — no queue
   infrastructure), embedded frontend.
-- **Frontend**: small SPA with three areas: capture and viewer (phone first), and library (desktop first). In development its
+- **Frontend**: small SPA: capture and viewer (phone first), library and wishlist (desktop first). In development its
   dev server proxies `/api` to the Go process and is exposed on the LAN so the
   phone gets live reloads too.
-- **Config**: API keys (LLM, TMDB) and data directory via environment variables.
+- **Config**: API keys (LLM, TMDB), data directory and the watcher connection via environment variables.
 
 ## Viewer (barebones)
 
@@ -148,6 +152,172 @@ this?" while looking at a disc sale in another tab.
   "The"/"A"/"An"), year, recently added.
 - Selecting a card lists the discs that hold it, each linking to the item detail.
 
+## Wishlist and offers (phase 2)
+
+The catalogue will run on a VPS behind Tailscale, reachable from anywhere. It
+is paired with **cdon-watcher**, which crawls disc shops (Levykauppa Äx, CDON)
+and matches their listings to TMDB. The catalogue owns everything about *me*:
+what I own and what I want. The watcher is a crawler, a database of offers, and
+a browsing UI for deals outside the wishlist. It keeps no state about me apart
+from "not interested" ignores, and pulls what I own and want from here.
+
+The two jobs:
+
+1. **Browsing for deals I didn't plan on**, on the watcher's main page: the
+   category crawl, with movies I own hidden automatically.
+2. **Seeing when wished-for movies are on sale**, on the wishlist page here:
+   the watcher searches each shop for every wish on each refresh, so they are
+   found even when they never appear in the crawled categories.
+
+### Ownership of data
+
+| Data | Lives in |
+|---|---|
+| Owned discs, formats | catalogue |
+| Wishlist, accepted formats, price caps | catalogue |
+| Store products, prices, price history, stock | watcher |
+| Listing → TMDB matching and its manual queue | watcher |
+| "Not interested" ignores while browsing | watcher |
+
+The shared key is the **TMDB movie id**. The watcher only matches movies, so
+offers are only looked up for wishes whose title is a movie. A series can still
+be wished for, as a note to self. Formats translate between the systems as
+`bd` = Blu-ray and `4k` = UHD. The watcher does not track DVDs, so a wish
+accepts Blu-ray and/or UHD only.
+
+The watcher's own watch preference is replaced by wishes here. Its browsing
+price limits (Blu-ray ≤ €10, UHD ≤ €20) stay, for job 1; a wish's own price cap
+applies to job 2.
+
+**Owned movies while browsing** (the watcher applies this rule to the owned list):
+
+| I own it on | Offers on the watcher's main page |
+|---|---|
+| Nothing | Shown |
+| DVD only | Shown, marked "Own: DVD" (an upgrade candidate) |
+| Blu-ray or UHD | Hidden |
+| Anything, and it's on the wishlist | Shown, marked "On wishlist" |
+
+Upgrading from Blu-ray to UHD is rare and deliberate, so it goes through the
+wishlist, not browsing.
+
+### Want
+
+- A want points at a title (the same `titles` row an owned item would use),
+  so it always has a TMDB id. One want per title.
+- **Formats**: Blu-ray, UHD, or both (the default). An upgrade is just a want
+  for a better format than the one owned, for example UHD for a movie I own on DVD.
+- **Price cap** (optional, euros): the most I'd pay. Without one, any price is shown
+  but nothing is called a deal.
+- **Notes**: free text.
+- Wishes are added from a TMDB search on the wishlist page. When the title is
+  already owned, the page says in which format(s), so it's clear whether the
+  wish is an upgrade or a mistake.
+- A wish stays after the disc is bought. Removing it is a manual step. (Later:
+  offer to remove it when a captured disc matches.)
+
+### Offers
+
+An offer is a store product matched to the wish's TMDB id, in an accepted
+format, that the watcher saw recently (within 48 hours, its freshness rule) and
+that is still active. Each one carries the store, listing title, format, condition (new / used),
+price, regular price when discounted, availability (in stock, supplier order,
+preorder, sold out, unknown) and a link to the listing.
+
+- An offer is a **deal** when it is in stock and at or under the wish's price cap.
+- The catalogue never writes to the watcher.
+
+### Wishlist page (`#/wishlist`, desktop first, usable on the phone)
+
+- A search box to add a wish (TMDB search, like the review panel).
+- One row per wish: poster, title and year, formats owned (if any), accepted
+  formats, price cap, notes, and its offers sorted by price, deals highlighted.
+- Wishes with a deal come first, then wishes with any offer, then the rest; within
+  each group, newest first.
+- Formats, price cap and notes are edited in place; a wish can be removed.
+- When the watcher can't be reached, the wishlist still works and says that
+  offers are unavailable.
+
+### Connecting to the watcher
+
+**Watcher → catalogue.** At the start of each refresh the watcher pulls
+`GET /api/sync`, read-only, which returns what I own and what I want (movies only):
+
+```json
+{
+  "owned":  [{"tmdb_id": 9874, "formats": ["Blu-ray"]}],
+  "wanted": [{"tmdb_id": 9874, "title": "Cobra", "original_title": "Cobra",
+              "year": 1986, "formats": ["UHD"], "max_price_cents": 2000}]
+}
+```
+
+- `owned` lists the formats of all discs holding the movie, from identified
+  items and items in review (their format is usually right). Items still waiting
+  for identification are left out.
+- The watcher keeps the last response, so it is never blocked by the catalogue being down.
+- The watcher's "Add to wishlist" action on an offer calls `POST /api/wants`.
+
+**Catalogue → watcher.** A read-only endpoint on the watcher, configured here
+as `WATCHER_URL` (for example `http://cdon-watcher:8080`):
+
+```
+GET /api/v2/offers?tmdb_id=9874&tmdb_id=1551
+```
+
+```json
+{
+  "offers": {
+    "9874": {
+      "searched_at": "2026-11-11T06:00:00Z",
+      "items": [
+        {"id": 412, "store_key": "ax", "store": "Levykauppa Äx",
+         "title": "Cobra (4K Ultra HD)", "format": "4k", "condition": "new",
+         "price_cents": 2299, "regular_price_cents": 3599, "currency": "EUR",
+         "availability": "in_stock", "url": "https://www.levykauppax.fi/…",
+         "image_url": null, "last_seen_at": "2026-11-11T11:46:17Z"}
+      ]
+    },
+    "1551": {"searched_at": null, "items": []}
+  }
+}
+```
+
+- Every requested id is a key. `items` holds active, single-movie `bd`/`4k`
+  listings within the watcher's freshness limit, every availability, cheapest
+  first (then by id). Timestamps are ISO 8601 UTC.
+- `availability` is one of `in_stock`, `supplier_order` (orderable, ships in
+  days or weeks), `preorder` (not released yet), `out_of_stock` (a sold-out Äx
+  edition, or a CDON listing with zero stock) and `unknown`. Only `in_stock`
+  can be a deal. The others are shown dimmed, labelled. A value the catalogue
+  doesn't know is shown as is.
+- `searched_at` is when the watcher last searched the shops for the movie, `null`
+  if it has not yet. It is what tells "nothing found" apart from "not searched
+  yet" (for example a wish added since the last refresh). Each offer's own age is
+  `last_seen_at`; scheduling searches is the watcher's business and is not exposed.
+- `id` is the watcher's store product id; the wishlist links to its
+  `/products/<id>` price history page.
+- Errors are a non-2xx status. The wishlist then shows without prices.
+
+For development without the API, `WATCHER_DB` reads the watcher's SQLite file
+directly, read-only; it knows nothing about searches. `WATCHER_URL` wins when
+both are set. Without either, the wishlist works without offers.
+
+On the wishlist, a wish with no offers says either "Not searched for yet" or
+"No shop has it … (searched 3 h ago)", and wishes with offers show when the shops
+were last searched.
+
+Reading the file directly is a development stand-in. It couples the catalogue to
+the watcher's schema, and needs both processes on the same machine.
+
+### Not yet
+
+- Notifications (push, email) when a deal appears.
+- Price history charts. The watcher has the data, and its product page can be linked.
+- Gaps: suggesting wishes from TMDB collections and studios
+  ("4 of 5 Lethal Weapons", "22 of 33 Pixar features").
+- Capturing a wish with the phone camera, through the identification pipeline.
+- Showing "on the wishlist" in the library.
+
 ## Build order
 
 1. Go server skeleton, SQLite schema, image upload and serving.
@@ -156,6 +326,10 @@ this?" while looking at a disc sale in another tab.
 3. Identification worker: barcode decode → LLM → TMDB.
 4. Viewer list and item detail.
 5. Review queue.
+6. Wishlist: wants table and API, wishlist page.
+7. Offers from the watcher's database; later from its HTTP API.
+8. `GET /api/sync` for the watcher; then, in the watcher, targeted searches and
+   owned-movie filtering (see its `docs/09_multi_store_plan.md`, phase 2).
 
 ## Open questions
 
