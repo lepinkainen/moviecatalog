@@ -17,6 +17,7 @@ import (
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
 	"github.com/lepinkainen/moviecatalog/internal/identify"
+	"github.com/lepinkainen/moviecatalog/internal/offers"
 	"github.com/lepinkainen/moviecatalog/internal/photo"
 )
 
@@ -40,6 +41,8 @@ type Server struct {
 	notify func()
 	// tmdb backs the manual title search; nil when no API key is configured.
 	tmdb *identify.TMDB
+	// offers backs the shop prices on the wishlist; nil when not configured.
+	offers offers.Source
 }
 
 // OnPending registers fn to be called whenever items are waiting for identification.
@@ -73,6 +76,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/items/{id}/identify", s.handleIdentifyItem)
 	mux.HandleFunc("GET /api/items/{id}/runs", s.handleListRuns)
 	mux.HandleFunc("GET /api/images/{id}", s.handleImage)
+	mux.HandleFunc("GET /api/wants", s.handleListWants)
+	mux.HandleFunc("POST /api/wants", s.handleCreateWant)
+	mux.HandleFunc("PUT /api/wants/{id}", s.handleUpdateWant)
+	mux.HandleFunc("DELETE /api/wants/{id}", s.handleDeleteWant)
+	mux.HandleFunc("GET /api/sync", s.handleSync)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
 	})
