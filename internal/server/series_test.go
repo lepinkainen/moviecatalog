@@ -13,6 +13,7 @@ import (
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
 	"github.com/lepinkainen/moviecatalog/internal/identify"
+	"github.com/lepinkainen/moviecatalog/internal/series"
 )
 
 func TestSeries(t *testing.T) {
@@ -70,7 +71,7 @@ func TestSeries(t *testing.T) {
 		t.Fatalf("wish: status = %d", resp.StatusCode)
 	}
 
-	got := decode[seriesResponse](t, get(t, ts.URL+"/api/series/84"))
+	got := decode[series.Series](t, get(t, ts.URL+"/api/series/84"))
 	if got.Name != "Indiana Jones" || got.Overview != "Adventures." {
 		t.Errorf("series = %q (%q), want Indiana Jones", got.Name, got.Overview)
 	}
