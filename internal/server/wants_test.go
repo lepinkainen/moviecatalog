@@ -287,6 +287,19 @@ func TestOnlyInStockIsADeal(t *testing.T) {
 	}
 }
 
+func TestSoldOutUsedOfferIsHidden(t *testing.T) {
+	id := int64(1)
+	want := &db.Want{Title: db.Title{TMDBID: &id, MediaType: db.MediaMovie}, Formats: []string{"UHD"}}
+	got := matchingOffers(want, []offers.Offer{
+		{Format: "UHD", Condition: "used", Availability: "out_of_stock", PriceCents: 1500},
+		{Format: "UHD", Condition: "used", Availability: "in_stock", PriceCents: 1600},
+		{Format: "UHD", Condition: "new", Availability: "out_of_stock", PriceCents: 2999},
+	})
+	if len(got) != 2 || got[0].PriceCents != 1600 || got[1].PriceCents != 2999 {
+		t.Errorf("offers = %+v, want the in-stock used and the sold-out new offer", got)
+	}
+}
+
 func TestCollectedWish(t *testing.T) {
 	src := &fakeOffers{movies: map[int64]offers.Movie{}}
 	ts, store := newWishlistServer(t, src)

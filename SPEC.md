@@ -266,6 +266,8 @@ price, regular price when discounted, availability (in stock, supplier order,
 preorder, sold out, unknown) and a link to the listing.
 
 - An offer is a **deal** when it is in stock and at or under the wish's price cap.
+- A used offer that is sold out is hidden: a used listing is a single copy, so
+  its price belongs to a product that no longer exists.
 - The catalogue never writes to the watcher.
 
 ### Wishlist page (`#/wishlist`, desktop first, usable on the phone)

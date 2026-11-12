@@ -36,6 +36,9 @@ type Offer struct {
 // InStock is the availability of an offer that can be bought right away.
 const InStock = "in_stock"
 
+// OutOfStock is the availability of a sold-out offer.
+const OutOfStock = "out_of_stock"
+
 // Movie is what the watcher knows about one wished-for movie.
 type Movie struct {
 	// SearchedAt is when the watcher last searched the shops for the movie;

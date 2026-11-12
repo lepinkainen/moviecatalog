@@ -86,7 +86,8 @@ func (s *Server) handleListWants(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-// matchingOffers keeps the offers in a format the wish accepts.
+// matchingOffers keeps the offers in a format the wish accepts. A sold-out used
+// listing is dropped: it was a single copy, so it won't come back.
 func matchingOffers(want *db.Want, all []offers.Offer) []wantOffer {
 	matching := []wantOffer{}
 	if want.Title.MediaType != db.MediaMovie {
@@ -94,6 +95,9 @@ func matchingOffers(want *db.Want, all []offers.Offer) []wantOffer {
 	}
 	for _, o := range all {
 		if !slices.Contains(want.Formats, o.Format) {
+			continue
+		}
+		if o.Condition == "used" && o.Availability == offers.OutOfStock {
 			continue
 		}
 		deal := o.Availability == offers.InStock && want.MaxPriceCents != nil && o.PriceCents <= *want.MaxPriceCents
