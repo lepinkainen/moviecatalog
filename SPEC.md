@@ -166,6 +166,21 @@ this?" while looking at a disc sale in another tab.
   - Not yet: a series set by hand for what TMDB doesn't group (the MCU, "Studio
     Ghibli"), overriding the collection.
 
+### Static export
+
+`moviecatalog export --output=site/` writes the library as a read-only static
+site, to upload to a public web host that serves only files. The page is the
+same Library (search, series matching, filters, sort, the title panel and its
+series list) without links into the catalogue or a wishlist.
+
+- Public, so its data is an allowlist: identified discs only, with their titles,
+  formats, series and capture date (no time). Barcodes, notes, photos, items in
+  review and the wishlist stay out.
+- Posters are loaded from TMDB's image CDN; the footer carries TMDB's attribution.
+- Series lists are a snapshot from TMDB at export time.
+- Re-running replaces the previous export and leaves other files in the
+  directory (a `CNAME`, `robots.txt`) alone.
+
 ## Wishlist and offers (phase 2)
 
 The catalogue will run on a VPS behind Tailscale, reachable from anywhere. It

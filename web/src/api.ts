@@ -30,6 +30,13 @@ export interface Item {
   titles: Title[];
 }
 
+/**
+ * The part of an item the library needs. The static export has only these
+ * fields, without photos or notes.
+ */
+export type LibraryItem = Pick<Item, 'id' | 'captured_at' | 'status' | 'format' | 'titles'> &
+  Partial<Pick<Item, 'images' | 'notes'>>;
+
 export const FORMATS = ['DVD', 'Blu-ray', 'UHD'] as const;
 
 /** Higher is better; formats outside FORMATS rank below all of them. */
@@ -113,7 +120,7 @@ export function statusLabel(status: string): string {
 }
 
 /** One-line description of what an item contains. */
-export function titleLine(item: Item): string {
+export function titleLine(item: Pick<Item, 'titles' | 'status'>): string {
   if (item.titles.length === 0) {
     return item.status === 'captured' ? 'Waiting for identification' : 'Not identified';
   }
@@ -202,6 +209,9 @@ export interface SeriesPart {
   /** On the wishlist. */
   wanted: boolean;
 }
+
+/** Loads a series for a series list; null when it is not available (the static export without TMDB). */
+export type SeriesLoader = (id: number) => Promise<Series | null>;
 
 export async function getSeries(id: number): Promise<Series> {
   const resp = await check(await fetch(`/api/series/${id}`));

@@ -4,6 +4,7 @@
   import ItemDetail from './ItemDetail.svelte';
   import Library from './Library.svelte';
   import Wishlist from './Wishlist.svelte';
+  import { parseLibraryHash } from './route';
 
   type Route =
     | { page: 'capture' }
@@ -17,11 +18,8 @@
     if (item) return { page: 'item', id: Number(item[1]) };
     if (hash === '#/items') return { page: 'catalogue' };
     if (hash === '#/wishlist') return { page: 'wishlist' };
-    const library = hash.match(/^#\/library(?:\/(\d+))?(?:\?(.*))?$/);
-    if (library) {
-      const q = new URLSearchParams(library[2] ?? '').get('q');
-      return { page: 'library', selected: library[1] ? Number(library[1]) : null, q };
-    }
+    const library = parseLibraryHash(hash);
+    if (library) return { page: 'library', ...library };
     return { page: 'capture' };
   }
 

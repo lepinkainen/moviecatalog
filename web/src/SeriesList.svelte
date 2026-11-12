@@ -1,19 +1,32 @@
 <script lang="ts">
-  import { createWant, getSeries, posterURL, type Series, type SeriesPart } from './api';
+  import { createWant, getSeries, posterURL, type Series, type SeriesLoader, type SeriesPart } from './api';
 
-  /** id: the TMDB collection. current: the TMDB ids of the movies being viewed, to highlight them. */
-  let { id, current = [] }: { id: number; current?: number[] } = $props();
+  /**
+   * id: the TMDB collection. current: the TMDB ids of the movies being viewed, to highlight them.
+   * load: where the series comes from; the list hides itself when it gives null.
+   * readonly: the static export, with no wishlist.
+   */
+  let {
+    id,
+    current = [],
+    load = getSeries,
+    readonly = false,
+  }: { id: number; current?: number[]; load?: SeriesLoader; readonly?: boolean } = $props();
 
   let series = $state<Series | null>(null);
+  let missing = $state(false);
   let error = $state<string | null>(null);
 
   $effect(() => {
     const wanted = id;
     series = null;
+    missing = false;
     error = null;
-    getSeries(wanted).then(
+    load(wanted).then(
       (s) => {
-        if (wanted === id) series = s;
+        if (wanted !== id) return;
+        series = s;
+        missing = s === null;
       },
       (e) => {
         if (wanted === id) error = e instanceof Error ? e.message : String(e);
@@ -49,6 +62,7 @@
   const owned = $derived(released.filter((p) => p.copies.length > 0).length);
 </script>
 
+{#if !missing}
 <section class="series">
   {#if error}
     <p class="muted">Could not load the series: {error}</p>
@@ -78,11 +92,11 @@
               {best.format ?? 'owned'}{#if part.copies.length > 1}<span class="muted"> ×{part.copies.length}</span>{/if}
             {:else if !part.released}
               <span class="muted">upcoming</span>
-            {:else if part.wanted}
+            {:else if part.wanted && !readonly}
               <a class="muted" href="#/wishlist">on wishlist</a>
             {:else}
               <span class="muted">not owned</span>
-              <button
+              {#if !readonly}<button
                 class="wish"
                 class:failed={failed[part.tmdb_id]}
                 title={failed[part.tmdb_id]
@@ -91,7 +105,7 @@
                 aria-label="Add {part.title} to the wishlist"
                 disabled={adding.includes(part.tmdb_id)}
                 onclick={() => wish(part)}>+</button
-              >
+              >{/if}
             {/if}
           </span>
         </li>
@@ -99,6 +113,7 @@
     </ol>
   {/if}
 </section>
+{/if}
 
 <style>
   .series {

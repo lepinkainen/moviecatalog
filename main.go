@@ -4,6 +4,8 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
+	"github.com/lepinkainen/moviecatalog/internal/export"
 	"github.com/lepinkainen/moviecatalog/internal/identify"
 	"github.com/lepinkainen/moviecatalog/internal/offers"
 	"github.com/lepinkainen/moviecatalog/internal/server"
@@ -50,12 +53,92 @@ func checkWatcher(ctx context.Context, log *slog.Logger, ping func(context.Conte
 	log.Info("shop watcher is responding", key, where, "duration", time.Since(start).Round(time.Millisecond))
 }
 
+const usage = `Usage:
+  moviecatalog [serve]                 run the server (configured by environment variables)
+  moviecatalog export [flags]          write the library as a read-only static site
+
+Run "moviecatalog export -h" for the export flags.
+`
+
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if err := run(log); err != nil {
+	cmd, args := "serve", os.Args[1:]
+	if len(args) > 0 {
+		cmd, args = args[0], args[1:]
+	}
+	var err error
+	switch cmd {
+	case "serve":
+		err = run(log)
+	case "export":
+		err = runExport(log, args)
+	case "-h", "-help", "--help", "help":
+		fmt.Print(usage)
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
+		os.Exit(2)
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
 		log.Error("fatal", "error", err)
 		os.Exit(1)
 	}
+}
+
+// runExport writes the library page with the identified collection into a
+// directory, for uploading to a static web host.
+func runExport(log *slog.Logger, args []string) error {
+	flags := flag.NewFlagSet("export", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprint(flags.Output(), `Usage: moviecatalog export [flags]
+
+Writes index.html, data.json and assets/ into the output directory, replacing
+an earlier export there and leaving other files alone. Only identified discs
+are included, with their titles, formats and series; barcodes, notes, photos
+and the wishlist stay out. Set TMDB_API_KEY to include the series lists.
+
+Flags:
+`)
+		flags.PrintDefaults()
+	}
+	out := flags.String("output", "site", "directory to write the site into")
+	title := flags.String("title", "Movie collection", "heading and page title")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		flags.Usage()
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+
+	dataDir := envOr("MOVIECATALOG_DATA_DIR", "data")
+	dbPath := filepath.Join(dataDir, "moviecatalog.db")
+	// Opening a missing database would create an empty one and export nothing.
+	if _, err := os.Stat(dbPath); err != nil {
+		return fmt.Errorf("no catalogue at %s (set MOVIECATALOG_DATA_DIR): %w", dbPath, err)
+	}
+	store, err := db.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := export.Options{Dir: *out, Title: *title, Now: time.Now()}
+	if key := os.Getenv("TMDB_API_KEY"); key != "" {
+		opts.TMDB = &identify.TMDB{APIKey: key, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	}
+	sum, err := export.Run(ctx, store, webui.ExportFS(), opts, log)
+	if err != nil {
+		return err
+	}
+	log.Info("exported", "dir", *out, "discs", sum.Items, "titles", sum.Titles, "series", sum.Series)
+	return nil
 }
 
 func run(log *slog.Logger) error {

@@ -8,7 +8,7 @@ cmd = "go build -o ./tmp/moviecatalog ."
 entrypoint = ["./tmp/moviecatalog"]
 # SQL migrations and the model price list are embedded in the binary, so they need a rebuild too.
 include_ext = ["go", "sql", "json"]
-exclude_dir = ["web", "build", "data", "tmp", "internal/webui/dist"]
+exclude_dir = ["web", "build", "data", "tmp", "internal/webui/dist", "internal/webui/export", "site"]
 exclude_regex = ["_test\\.go$"]
 delay = 500
 # Keep the previous build running when the new one does not compile.

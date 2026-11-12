@@ -3,12 +3,14 @@
   import {
     FORMATS,
     formatRank,
+    getSeries,
     listItems,
     posterURL,
     statusLabel,
     thumb,
     titleLine,
-    type Item,
+    type LibraryItem,
+    type SeriesLoader,
     type Title,
   } from './api';
   import SeriesList from './SeriesList.svelte';
@@ -16,8 +18,22 @@
   /**
    * selected: the title id from the URL whose discs are shown in the side panel.
    * q: a search from the URL (#/library?q=…), so a browser keyword search can open it.
+   * load, loadSeries: where the items and series come from; the static export passes its data.
+   * readonly: the static export, with no catalogue to link to and nothing to refresh.
    */
-  let { selected, q }: { selected: number | null; q: string | null } = $props();
+  let {
+    selected,
+    q,
+    load = listItems,
+    loadSeries = getSeries,
+    readonly = false,
+  }: {
+    selected: number | null;
+    q: string | null;
+    load?: () => Promise<LibraryItem[]>;
+    loadSeries?: SeriesLoader;
+    readonly?: boolean;
+  } = $props();
 
   // One card per movie or series, however many discs it is on.
   interface Entry {
@@ -28,7 +44,7 @@
     /** The series name for a movie in one, so a series files together: Raiders under I. */
     sortTitle: string;
     best: string | null;
-    items: Item[];
+    items: LibraryItem[];
     /** None of its discs has been confirmed yet, so the match is still a guess. */
     unconfirmed: boolean;
     addedAt: string;
@@ -46,7 +62,7 @@
 
   const REFRESH_MS = 4000;
 
-  let items = $state<Item[] | null>(null);
+  let items = $state<LibraryItem[] | null>(null);
   let error = $state<string | null>(null);
   let query = $state('');
   let format = $state<FormatFilter>('all');
@@ -179,9 +195,9 @@
 
   const current = $derived(selected === null ? null : (entries.find((e) => e.ids.includes(selected)) ?? null));
 
-  async function load() {
+  async function refresh() {
     try {
-      items = await listItems();
+      items = await load();
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -189,12 +205,13 @@
   }
 
   onMount(() => {
-    load();
+    refresh();
     // The common visit is "do I own this?", so be ready to type. Skipped on
     // touch screens, where it would pop up the keyboard.
     if (matchMedia('(pointer: fine)').matches) searchInput?.focus();
+    if (readonly) return;
     const timer = setInterval(() => {
-      if (error || items?.some((i) => i.status === 'captured')) load();
+      if (error || items?.some((i) => i.status === 'captured')) refresh();
     }, REFRESH_MS);
     return () => clearInterval(timer);
   });
@@ -268,7 +285,7 @@
     {#if items === null}
       {#if !error}<p class="empty">Loading…</p>{/if}
     {:else if entries.length === 0}
-      <p class="empty">No identified titles yet. <a href="#/items">See the catalogue.</a></p>
+      <p class="empty">No identified titles yet.{#if !readonly} <a href="#/items">See the catalogue.</a>{/if}</p>
     {:else if visible.length === 0}
       {#if terms.length > 0}
         <div class="verdict">
@@ -317,7 +334,7 @@
       </ul>
     {/if}
 
-    {#if notInLibrary > 0}
+    {#if notInLibrary > 0 && !readonly}
       <p class="empty small">
         {notInLibrary} disc{notInLibrary === 1 ? ' is' : 's are'} not shown because {notInLibrary === 1
           ? 'it is'
@@ -349,23 +366,32 @@
         </p>
 
         {#if t.series}
-          <SeriesList id={t.series.id} current={t.tmdb_id ? [t.tmdb_id] : []} />
+          <SeriesList id={t.series.id} current={t.tmdb_id ? [t.tmdb_id] : []} load={loadSeries} {readonly} />
         {/if}
 
         <h3>On {current.items.length} disc{current.items.length === 1 ? '' : 's'}</h3>
         <ul class="discs">
           {#each current.items as item (item.id)}
-            {@const front = item.images.find((i) => i.kind === 'front')}
+            {@const front = item.images?.find((i) => i.kind === 'front')}
             <li>
-              <a href="#/items/{item.id}">
-                {#if front}<img src={thumb(front, 160)} alt="" loading="lazy" />{:else}<span class="noimg"></span>{/if}
-                <span class="text">
-                  <span><strong>{item.format ?? 'Unknown format'}</strong> <span class="muted">#{item.id}</span></span>
-                  {#if item.titles.length > 1}<span class="muted">{titleLine(item)}</span>{/if}
-                  {#if item.notes}<span class="muted">{item.notes}</span>{/if}
-                  {#if item.status !== 'identified'}<span class="review">{statusLabel(item.status)}</span>{/if}
-                </span>
-              </a>
+              {#if readonly}
+                <div class="disc">
+                  <span class="text">
+                    <strong>{item.format ?? 'Unknown format'}</strong>
+                    {#if item.titles.length > 1}<span class="muted">{titleLine(item)}</span>{/if}
+                  </span>
+                </div>
+              {:else}
+                <a class="disc" href="#/items/{item.id}">
+                  {#if front}<img src={thumb(front, 160)} alt="" loading="lazy" />{:else}<span class="noimg"></span>{/if}
+                  <span class="text">
+                    <span><strong>{item.format ?? 'Unknown format'}</strong> <span class="muted">#{item.id}</span></span>
+                    {#if item.titles.length > 1}<span class="muted">{titleLine(item)}</span>{/if}
+                    {#if item.notes}<span class="muted">{item.notes}</span>{/if}
+                    {#if item.status !== 'identified'}<span class="review">{statusLabel(item.status)}</span>{/if}
+                  </span>
+                </a>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -657,7 +683,7 @@
     gap: 0.4rem;
   }
 
-  .discs a {
+  .disc {
     display: flex;
     gap: 0.75rem;
     align-items: center;
@@ -668,7 +694,7 @@
     background: var(--bg);
   }
 
-  .discs a:hover {
+  a.disc:hover {
     outline: 1px solid var(--border);
   }
 
