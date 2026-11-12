@@ -21,6 +21,30 @@ tasks:
       - mkdir -p {{.BUILD_DIR}}
       - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o {{.BUILD_DIR}}/{{.APP_NAME}}-linux-amd64 .
 
+  export:
+    desc: Write the read-only library site into site/ (flags after --, e.g. task export -- --title="My discs"; series need TMDB_API_KEY)
+    deps: [web-build]
+    cmds:
+      - go run . export {{.CLI_ARGS}}
+
+  export-op:
+    desc: Like export, with TMDB_API_KEY resolved from 1Password (op.env)
+    deps: [web-build]
+    cmds:
+      - op run --env-file=op.env -- go run . export {{.CLI_ARGS}}
+
+  publish:
+    desc: Export the site with series lists and upload it to PUBLISH_HOST (both from op.env); export flags go after --
+    deps: [web-build]
+    cmds:
+      - |
+        op run --env-file=op.env -- sh -c '
+          set -e
+          : "${PUBLISH_HOST:?PUBLISH_HOST is not set in op.env}"
+          go run . export --output=site/ {{.CLI_ARGS}}
+          rsync -avz --delete site/ "$PUBLISH_HOST:/opt/data/caddy/site/movies/"
+        '
+
   test:
     desc: Run Go tests
     cmds:
