@@ -2,8 +2,7 @@
   import { untrack } from 'svelte';
   import { WANT_FORMATS, ago, deleteWant, euros, posterURL, updateWant, type Offer, type Want } from './api';
 
-  /** searches: whether the source reports when the shops were last searched. */
-  let { want, searches, onchanged }: { want: Want; searches: boolean; onchanged: () => void } = $props();
+  let { want, onchanged }: { want: Want; onchanged: () => void } = $props();
 
   /** Offers shown before "show all". */
   const FIRST_OFFERS = 4;
@@ -146,7 +145,7 @@
 
     {#if want.offers !== null && want.title.media_type === 'movie' && !want.collected_on}
       {#if offers.length === 0}
-        {#if searches && !want.searched_at}
+        {#if !want.searched_at}
           <p class="muted">Not searched for yet. The shops are searched on the watcher's next refresh.</p>
         {:else}
           <p class="muted">

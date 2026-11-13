@@ -6,7 +6,7 @@ identifies the release with an OpenAI vision model and matches it against TMDB.
 Anything uncertain goes to a review queue.
 
 It also keeps a wishlist with shop offers from
-[cdon-watcher](https://github.com/lepinkainen/cdon-watcher), and can export the
+[shelfwatch](https://github.com/lepinkainen/shelfwatch), and can export the
 library as a read-only static site.
 
 It is a single Go binary with an embedded Svelte frontend, storing data in
@@ -34,7 +34,7 @@ authentication, so run it only on a trusted network.
 | `OPENAI_MODEL` | Vision model (has a built-in default) |
 | `MOVIECATALOG_ADDR` | Listen address, default `:8080` |
 | `MOVIECATALOG_DATA_DIR` | Database and photos, default `data` |
-| `WATCHER_URL` | cdon-watcher base URL, for wishlist offers (optional) |
+| `WATCHER_URL` | shelfwatch base URL, for wishlist offers (optional) |
 
 ### Static export
 

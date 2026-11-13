@@ -20,17 +20,14 @@ type WatcherAPI struct {
 }
 
 // NewWatcherAPI returns a client for the watcher at baseURL, for example
-// http://cdon-watcher:8080.
+// http://shelfwatch:8080.
 func NewWatcherAPI(baseURL string, client *http.Client) (*WatcherAPI, error) {
 	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("WATCHER_URL %q must be an http(s) URL such as http://cdon-watcher:8080", baseURL)
+		return nil, fmt.Errorf("WATCHER_URL %q must be an http(s) URL such as http://shelfwatch:8080", baseURL)
 	}
 	return &WatcherAPI{base: u, http: client}, nil
 }
-
-// TracksSearches implements Source.
-func (w *WatcherAPI) TracksSearches() bool { return true }
 
 // maxResponseBytes caps an offers response; a few hundred wishes are well under it.
 const maxResponseBytes = 8 << 20

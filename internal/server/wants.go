@@ -33,10 +33,8 @@ type wantView struct {
 }
 
 type offersStatus struct {
-	Configured bool `json:"configured"`
-	// Searches says whether searched_at is known; see offers.Source.
-	Searches bool    `json:"searches"`
-	Error    *string `json:"error"`
+	Configured bool    `json:"configured"`
+	Error      *string `json:"error"`
 }
 
 type wishlist struct {
@@ -55,7 +53,6 @@ func (s *Server) handleListWants(w http.ResponseWriter, r *http.Request) {
 
 	var found map[int64]offers.Movie
 	if s.offers != nil {
-		resp.Offers.Searches = s.offers.TracksSearches()
 		var ids []int64
 		for _, want := range wants {
 			if want.Title.MediaType == db.MediaMovie && want.CollectedOn == nil {

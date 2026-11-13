@@ -231,7 +231,7 @@ export async function deleteItem(id: number): Promise<void> {
 /** Formats a wish can accept: the ones the shop watcher tracks. */
 export const WANT_FORMATS = ['Blu-ray', 'UHD'] as const;
 
-/** A shop listing for a wished-for movie, from cdon-watcher. */
+/** A shop listing for a wished-for movie, from shelfwatch. */
 export interface Offer {
   store_key: string;
   store: string;
@@ -264,7 +264,7 @@ export interface Want {
   owned_formats: string[];
   /** Null when offers could not be looked up. */
   offers: Offer[] | null;
-  /** When the watcher last searched the shops for it; see Wishlist.offers.searches. */
+  /** When the watcher last searched the shops for it; null if it has not yet. */
   searched_at: string | null;
   /** The day a captured disc fulfilled the wish (YYYY-MM-DD); null while still wanted. */
   collected_on: string | null;
@@ -274,8 +274,6 @@ export interface Wishlist {
   wants: Want[];
   offers: {
     configured: boolean;
-    /** Whether searched_at is known; without it an empty result may just mean "not searched yet". */
-    searches: boolean;
     error: string | null;
   };
 }

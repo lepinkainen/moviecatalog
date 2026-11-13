@@ -29,8 +29,6 @@ func (f *fakeOffers) Lookup(_ context.Context, ids []int64) (map[int64]offers.Mo
 	return f.movies, f.err
 }
 
-func (f *fakeOffers) TracksSearches() bool { return true }
-
 func newWishlistServer(t *testing.T, src offers.Source) (*httptest.Server, *db.Store) {
 	t.Helper()
 	dataDir := t.TempDir()
@@ -74,7 +72,6 @@ type wishlistResponse struct {
 	} `json:"wants"`
 	Offers struct {
 		Configured bool    `json:"configured"`
-		Searches   bool    `json:"searches"`
 		Error      *string `json:"error"`
 	} `json:"offers"`
 }
@@ -174,8 +171,8 @@ func TestWishlistOffers(t *testing.T) {
 	}
 
 	list := decode[wishlistResponse](t, get(t, ts.URL+"/api/wants"))
-	if !list.Offers.Configured || !list.Offers.Searches || list.Offers.Error != nil {
-		t.Fatalf("offers status = %+v, want configured, tracking searches, without error", list.Offers)
+	if !list.Offers.Configured || list.Offers.Error != nil {
+		t.Fatalf("offers status = %+v, want configured, without error", list.Offers)
 	}
 	if len(src.asked) != 1 || src.asked[0] != 14160 {
 		t.Errorf("looked up %v, want only the movie", src.asked)

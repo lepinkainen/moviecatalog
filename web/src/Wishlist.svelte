@@ -131,7 +131,7 @@
 
   {#if wishlist}
     {#if !wishlist.offers.configured}
-      <p class="notice">Shop prices are off: the server has no connection to the shop watcher (<code>WATCHER_DB</code>).</p>
+      <p class="notice">Shop prices are off: the server has no connection to the shop watcher (<code>WATCHER_URL</code>).</p>
     {:else if wishlist.offers.error}
       <p class="notice">Shop prices are unavailable right now: {wishlist.offers.error}.</p>
     {/if}
@@ -145,7 +145,7 @@
         <h2>{s.label} <span class="n">{s.wants.length}</span></h2>
         <ul class="wants">
           {#each s.wants as w (rowKey(w))}
-            <WantRow want={w} searches={wishlist.offers.searches} onchanged={load} />
+            <WantRow want={w} onchanged={load} />
           {/each}
         </ul>
       </section>

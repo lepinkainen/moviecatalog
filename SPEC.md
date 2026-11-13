@@ -184,7 +184,7 @@ series list) without links into the catalogue or a wishlist.
 ## Wishlist and offers (phase 2)
 
 The catalogue will run on a VPS behind Tailscale, reachable from anywhere. It
-is paired with **cdon-watcher**, which crawls disc shops (Levykauppa Äx, CDON)
+is paired with **shelfwatch**, which crawls disc shops (Levykauppa Äx, CDON)
 and matches their listings to TMDB. The catalogue owns everything about *me*:
 what I own and what I want. The watcher is a crawler, a database of offers, and
 a browsing UI for deals outside the wishlist. It keeps no state about me apart
@@ -301,7 +301,7 @@ preorder, sold out, unknown) and a link to the listing.
 - The watcher's "Add to wishlist" action on an offer calls `POST /api/wants`.
 
 **Catalogue → watcher.** A read-only endpoint on the watcher, configured here
-as `WATCHER_URL` (for example `http://cdon-watcher:8080`):
+as `WATCHER_URL` (for example `http://shelfwatch:8080`):
 
 ```
 GET /api/v2/offers?tmdb_id=9874&tmdb_id=1551
@@ -341,16 +341,11 @@ GET /api/v2/offers?tmdb_id=9874&tmdb_id=1551
   `/products/<id>` price history page.
 - Errors are a non-2xx status. The wishlist then shows without prices.
 
-For development without the API, `WATCHER_DB` reads the watcher's SQLite file
-directly, read-only; it knows nothing about searches. `WATCHER_URL` wins when
-both are set. Without either, the wishlist works without offers.
+Without `WATCHER_URL`, the wishlist works without offers.
 
 On the wishlist, a wish with no offers says either "Not searched for yet" or
 "No shop has it … (searched 3 h ago)", and wishes with offers show when the shops
 were last searched.
-
-Reading the file directly is a development stand-in. It couples the catalogue to
-the watcher's schema, and needs both processes on the same machine.
 
 ### Not yet
 
@@ -371,7 +366,7 @@ the watcher's schema, and needs both processes on the same machine.
 4. Viewer list and item detail.
 5. Review queue.
 6. Wishlist: wants table and API, wishlist page.
-7. Offers from the watcher's database; later from its HTTP API.
+7. Offers from the watcher's HTTP API.
 8. `GET /api/sync` for the watcher; then, in the watcher, targeted searches and
    owned-movie filtering (see its `docs/09_multi_store_plan.md`, phase 2).
 

@@ -117,7 +117,7 @@ func TestWatcherAPINoIDs(t *testing.T) {
 }
 
 func TestNewWatcherAPIRejectsBadURL(t *testing.T) {
-	for _, u := range []string{"", "cdon-watcher:8080", "ftp://x", "http://"} {
+	for _, u := range []string{"", "shelfwatch:8080", "ftp://x", "http://"} {
 		if _, err := NewWatcherAPI(u, http.DefaultClient); err == nil || !strings.Contains(err.Error(), "WATCHER_URL") {
 			t.Errorf("NewWatcherAPI(%q) error = %v, want a WATCHER_URL error", u, err)
 		}
