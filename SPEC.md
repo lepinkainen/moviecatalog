@@ -35,8 +35,8 @@ Phase 2 adds a second one: **what do I want, and is it on sale anywhere?** (see
 | Identification | OpenAI API (vision + structured output); accuracy over cost and privacy during ingestion |
 | Detail level | Movie + format only |
 | Box sets | One item linked to every movie it contains |
-| TV series | One title per series; seasons go in the item's free-text notes |
-| Duplicates | Never interrupt capture; flagged in the review queue |
+| TV series | One title per series; each disc stores the season numbers it holds (a complete series is expanded from TMDB) |
+| Duplicates | Never interrupt capture; flagged in the review queue. Boxes of different seasons of one series are not duplicates |
 | Barcode | Decoded deterministically from the photos and stored when readable; no lookup, no AI reading |
 
 ## Core idea: capture now, identify later
@@ -82,7 +82,7 @@ Notes:
 2. **LLM vision**: both photos → JSON:
    - format: DVD / Blu-ray / UHD (a combo pack reports the best one)
    - a list of movies or series, each with title, original title and year
-   - for series: which season(s) the item holds, as text for the notes field
+   - for series: the season numbers the item holds, or that it is the complete series
    - confidence, and a short free-text reason when unsure
 
    The response is constrained to a JSON schema (structured output), so the
@@ -165,6 +165,18 @@ this?" while looking at a disc sale in another tab.
     and a movie is in at most one. TV series have none.
   - Not yet: a series set by hand for what TMDB doesn't group (the MCU, "Studio
     Ghibli"), overriding the collection.
+- **Seasons.** A TV series is one title, and each disc stores the season numbers
+  it holds. Identification reads them off the case. A box sold as the complete
+  series holds every season TMDB says had aired by the day it was captured. Without
+  a TMDB match it goes to review. In the review form a series has one checkbox per
+  TMDB season, or a text field ("1-3, 5") for a title typed by hand or when TMDB
+  is unavailable. A card shows the seasons owned ("Seasons 1–3"). The library
+  panel and the item detail list the series' seasons from TMDB (`GET /tv/{id}`)
+  with the discs holding each ("3 of 4 owned"). Announced seasons count as
+  upcoming, and specials (season 0) are listed only when owned. Discs that don't
+  say are counted under the list. Two boxes of one series in the same format are
+  duplicates only when their seasons overlap or either doesn't say. A missing
+  aired season shows "on wishlist", or a + that wishes for that season.
 
 ### Static export
 
@@ -209,8 +221,8 @@ The two jobs:
 | "Not interested" ignores while browsing | watcher |
 
 The shared key is the **TMDB movie id**. The watcher only matches movies, so
-offers are only looked up for wishes whose title is a movie. A series can still
-be wished for, as a note to self. Formats translate between the systems as
+offers are only looked up for wishes whose title is a movie. A series, or one
+season of it, can still be wished for, as a note to self. Formats translate between the systems as
 `bd` = Blu-ray and `4k` = UHD. The watcher does not track DVDs, so a wish
 accepts Blu-ray and/or UHD only.
 
@@ -233,7 +245,9 @@ wishlist, not browsing.
 ### Want
 
 - A want points at a title (the same `titles` row an owned item would use),
-  so it always has a TMDB id. One want per title.
+  so it always has a TMDB id. One want per title, or for a series also one per
+  season (a season box). A season wish is collected only by a disc holding
+  that season; a whole-series wish by any disc of the series.
 - **Formats**: Blu-ray, UHD, or both (the default). An upgrade is just a want
   for a better format than the one owned, for example UHD for a movie I own on DVD.
 - **Price cap** (optional, euros): the most I'd pay. Without one, any price is shown
