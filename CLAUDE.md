@@ -15,6 +15,7 @@ Tasks run through `task` (Taskfile.yml). Tools like `air` are pinned in `mise.to
 - `task dev-op`: like `dev`, with API keys resolved from 1Password via `op.env`
 - `task web-dev`: Vite dev server on the LAN that proxies `/api` to :8080, so the phone gets live reload
 - `task export` / `task export-op`: write the read-only library site into `site/` (`moviecatalog export --output=… --title=…`; flags go after `--`)
+- `task backup`: zip a `VACUUM INTO` snapshot of the database plus `images/` into `backups/` with the `sqlite3`/`zip` CLIs (for the laptop). `moviecatalog backup -dir=… -keep=N` (`internal/backup`) does the same without the CLIs, for a timer on a server.
 - `task publish`: `export` with keys from `op.env`, then `rsync` of `site/` to `$PUBLISH_HOST` (also in `op.env`)
 - Single test: `go test ./internal/identify -run TestIdentifyExactMatch`
 
@@ -28,7 +29,7 @@ Tests never hit the live OpenAI or TMDB APIs. `internal/identify/worker_test.go`
 
 The core rule is "capture now, identify later". Capture only stores evidence. Identification runs asynchronously, can be retried, and can be overridden by hand.
 
-- **`main.go`** has two subcommands: `serve` (the default) and `export`. Serving wires everything up: store → server → (optional) worker. The server calls `worker.Notify` through `OnPending` whenever items are queued.
+- **`main.go`** has three subcommands: `serve` (the default), `export` and `backup`. Serving wires everything up: store → server → (optional) worker. The server calls `worker.Notify` through `OnPending` whenever items are queued.
 - **`internal/db`**: SQLite (modernc, no cgo) and all queries.
   - Migrations are `migrations/NNNN_*.sql`, embedded and applied in name order. The count is tracked in `PRAGMA user_version`, so add new files and never edit applied ones.
   - Item `status` (`captured` → `identified` | `needs_review`) *is* the work queue. There is no separate queue infrastructure.

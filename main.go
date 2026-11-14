@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lepinkainen/moviecatalog/internal/backup"
 	"github.com/lepinkainen/moviecatalog/internal/db"
 	"github.com/lepinkainen/moviecatalog/internal/export"
 	"github.com/lepinkainen/moviecatalog/internal/identify"
@@ -56,8 +57,9 @@ func checkWatcher(ctx context.Context, log *slog.Logger, ping func(context.Conte
 const usage = `Usage:
   moviecatalog [serve]                 run the server (configured by environment variables)
   moviecatalog export [flags]          write the library as a read-only static site
+  moviecatalog backup [flags]          zip the database and original photos
 
-Run "moviecatalog export -h" for the export flags.
+Run "moviecatalog export -h" or "moviecatalog backup -h" for the flags.
 `
 
 func main() {
@@ -72,6 +74,8 @@ func main() {
 		err = run(log)
 	case "export":
 		err = runExport(log, args)
+	case "backup":
+		err = runBackup(log, args)
 	case "-h", "-help", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -139,6 +143,56 @@ Flags:
 		return err
 	}
 	log.Info("exported", "dir", *out, "discs", sum.Items, "titles", sum.Titles, "series", sum.Series, "shows", sum.Shows)
+	return nil
+}
+
+// runBackup zips the database and original photos into a timestamped file,
+// for running from a timer.
+func runBackup(log *slog.Logger, args []string) error {
+	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprint(flags.Output(), `Usage: moviecatalog backup [flags]
+
+Writes a consistent copy of the database and the original photos from
+MOVIECATALOG_DATA_DIR into <dir>/moviecatalog-YYYYMMDD-HHMMSS.zip. Thumbnails
+are left out; the server regenerates them. To restore, unzip the file into an
+empty data directory.
+
+Flags:
+`)
+		flags.PrintDefaults()
+	}
+	dir := flags.String("dir", "backups", "directory to write the zip into")
+	keep := flags.Int("keep", 0, "after a successful backup, delete all but the newest N backups in -dir (0 keeps all)")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 0 {
+		flags.Usage()
+		return fmt.Errorf("unexpected arguments: %v", flags.Args())
+	}
+	if *keep < 0 {
+		return fmt.Errorf("-keep must not be negative")
+	}
+
+	dataDir := envOr("MOVIECATALOG_DATA_DIR", "data")
+	out := filepath.Join(*dir, backup.FileName(time.Now()))
+	start := time.Now()
+	sum, err := backup.Run(dataDir, out)
+	if err != nil {
+		return err
+	}
+	log.Info("backed up", "file", out, "images", sum.Images, "mb", sum.Bytes>>20,
+		"duration", time.Since(start).Round(time.Millisecond))
+	if *keep > 0 {
+		deleted, err := backup.Prune(*dir, *keep)
+		if err != nil {
+			return fmt.Errorf("prune old backups: %w", err)
+		}
+		for _, name := range deleted {
+			log.Info("deleted old backup", "file", filepath.Join(*dir, name))
+		}
+	}
 	return nil
 }
 

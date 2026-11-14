@@ -8,6 +8,9 @@
 /internal/webui/export/*
 !/internal/webui/export/.gitkeep
 
+# Output of `task backup` and `moviecatalog backup`.
+/backups/
+
 # Output of `moviecatalog export`.
 /site/
 /.task/

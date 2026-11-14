@@ -45,6 +45,26 @@ tasks:
           rsync -avz --delete site/ "$PUBLISH_HOST:/opt/data/caddy/site/movies/"
         '
 
+  backup:
+    desc: Zip the database (a consistent snapshot) and original photos into backups/, with the sqlite3 and zip CLIs
+    cmds:
+      - |
+        set -eu
+        data="${MOVIECATALOG_DATA_DIR:-data}"
+        # sqlite3 would create an empty database at a wrong path.
+        test -f "$data/moviecatalog.db" || { echo "no catalogue at $data/moviecatalog.db" >&2; exit 1; }
+        mkdir -p backups
+        out="$PWD/backups/moviecatalog-$(date +%Y%m%d-%H%M%S).zip"
+        work=$(mktemp -d)
+        trap 'rm -rf "$work"' EXIT
+        # VACUUM INTO folds the WAL into one self-contained file; copying the .db alone would miss recent writes.
+        sqlite3 -init /dev/null "$data/moviecatalog.db" "VACUUM INTO '$work/moviecatalog.db'"
+        (cd "$work" && zip -q -9 backup.zip moviecatalog.db)
+        # JPEGs don't compress further, so store them as they are.
+        (cd "$data" && zip -q -r -0 "$work/backup.zip" images)
+        mv "$work/backup.zip" "$out"
+        echo "$out"
+
   test:
     desc: Run Go tests
     cmds:

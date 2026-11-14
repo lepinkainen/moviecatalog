@@ -44,6 +44,23 @@ task export -- --output=site/ --title="My discs"
 
 This writes identified discs only, with no barcodes, notes, photos or wishlist.
 
+### Backup
+
+Both write `backups/moviecatalog-YYYYMMDD-HHMMSS.zip` with a consistent
+snapshot of the database and the original photos (thumbnails are regenerated):
+
+```sh
+task backup                                  # laptop: uses the sqlite3 and zip CLIs
+moviecatalog backup -dir=/backups -keep=14   # server: no CLIs needed; run it from a timer
+```
+
+`-keep=N` deletes all but the newest N backups in the directory. Don't run a
+backup while capturing or editing.
+
+To restore, stop the server and unzip into an **empty** data directory. A
+leftover `moviecatalog.db-wal` or `-shm` next to the restored database would be
+applied on top of it and corrupt it.
+
 ## Development
 
 ```sh
