@@ -30,11 +30,14 @@ type Guess struct {
 
 // GuessTitle is one movie or series in a Guess.
 type GuessTitle struct {
-	MediaType     string  `json:"media_type"`
-	Title         string  `json:"title"`
-	OriginalTitle string  `json:"original_title"`
-	Year          *int    `json:"year"`
-	Seasons       *string `json:"seasons"`
+	MediaType     string `json:"media_type"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          *int   `json:"year"`
+	// Seasons are the season numbers of a TV release; nil for movies or when the case does not say.
+	Seasons []int `json:"seasons"`
+	// CompleteSeries is a TV release sold as every season of the series.
+	CompleteSeries bool `json:"complete_series"`
 }
 
 type object = map[string]any
@@ -46,13 +49,14 @@ var guessSchema = object{
 		"format": object{"type": "string", "enum": []string{"DVD", "Blu-ray", "UHD"}},
 		"titles": object{"type": "array", "items": object{
 			"type": "object", "additionalProperties": false,
-			"required": []string{"media_type", "title", "original_title", "year", "seasons"},
+			"required": []string{"media_type", "title", "original_title", "year", "seasons", "complete_series"},
 			"properties": object{
-				"media_type":     object{"type": "string", "enum": []string{"movie", "tv"}},
-				"title":          object{"type": "string"},
-				"original_title": object{"type": "string"},
-				"year":           object{"type": []string{"integer", "null"}},
-				"seasons":        object{"type": []string{"string", "null"}},
+				"media_type":      object{"type": "string", "enum": []string{"movie", "tv"}},
+				"title":           object{"type": "string"},
+				"original_title":  object{"type": "string"},
+				"year":            object{"type": []string{"integer", "null"}},
+				"seasons":         object{"type": []string{"array", "null"}, "items": object{"type": "integer"}},
+				"complete_series": object{"type": "boolean"},
 			},
 		}},
 		"confidence": object{"type": "string", "enum": []string{"high", "medium", "low"}},
@@ -68,7 +72,8 @@ Report:
   - title: as printed on the cover.
   - original_title: the original-language release title.
   - year: original release year of the movie, or first air year of the series.
-  - seasons: for TV, which season(s) or volume this release holds, e.g. "Season 2" or "Complete series"; null for movies.
+  - seasons: for TV, the season numbers this release holds, e.g. [2] or [1, 2, 3]; British "Series 2" is season 2. Null for movies, or when the case does not say which seasons.
+  - complete_series: true when a TV release is sold as the complete series; otherwise false.
 - confidence: how sure you are of the identification as a whole.
 - notes: one short sentence, only when something is uncertain; otherwise empty.`
 

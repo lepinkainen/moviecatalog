@@ -4,21 +4,25 @@
     FORMATS,
     formatRank,
     getSeries,
+    getShow,
     listItems,
     posterURL,
+    seasonsLabel,
     statusLabel,
     thumb,
     titleLine,
     type LibraryItem,
     type SeriesLoader,
+    type ShowLoader,
     type Title,
   } from './api';
+  import SeasonList from './SeasonList.svelte';
   import SeriesList from './SeriesList.svelte';
 
   /**
    * selected: the title id from the URL whose discs are shown in the side panel.
    * q: a search from the URL (#/library?q=…), so a browser keyword search can open it.
-   * load, loadSeries: where the items and series come from; the static export passes its data.
+   * load, loadSeries, loadShow: where the items, series and seasons come from; the static export passes its data.
    * readonly: the static export, with no catalogue to link to and nothing to refresh.
    */
   let {
@@ -26,12 +30,14 @@
     q,
     load = listItems,
     loadSeries = getSeries,
+    loadShow = getShow,
     readonly = false,
   }: {
     selected: number | null;
     q: string | null;
     load?: () => Promise<LibraryItem[]>;
     loadSeries?: SeriesLoader;
+    loadShow?: ShowLoader;
     readonly?: boolean;
   } = $props();
 
@@ -48,6 +54,8 @@
     /** None of its discs has been confirmed yet, so the match is still a guess. */
     unconfirmed: boolean;
     addedAt: string;
+    /** For a series: the seasons on its discs. */
+    seasons: number[];
   }
 
   const FORMAT_FILTERS = ['all', ...[...FORMATS].reverse()] as const;
@@ -134,11 +142,13 @@
             items: [],
             unconfirmed: true,
             addedAt: item.captured_at,
+            seasons: [],
           };
           byKey.set(k, e);
         }
         if (!e.ids.includes(t.id)) e.ids.push(t.id);
         if (e.items.includes(item)) continue;
+        e.seasons.push(...(t.seasons ?? []));
         e.items.push(item);
         if (formatRank(item.format) > formatRank(e.best)) e.best = item.format;
         if (item.status === 'identified') e.unconfirmed = false;
@@ -230,6 +240,12 @@
       if (typing) target.blur();
       else if (selected !== null) close();
     }
+  }
+
+  // The seasons of the entry's series on one disc.
+  function discSeasons(item: LibraryItem, entry: Entry): string | null {
+    const t = item.titles.find((t) => groupKey(t) === entry.key);
+    return t ? seasonsLabel(t.seasons ?? []) : null;
   }
 
   // The series name, unless the title already says it ("Indiana Jones and the Temple of Doom").
@@ -325,7 +341,7 @@
               {#if seriesLabel(entry.title)}<span class="series">{seriesLabel(entry.title)}</span>{/if}
               <span class="meta">
                 {entry.title.year ?? '—'}
-                {#if entry.title.media_type === 'tv'}· series{/if}
+                {#if entry.title.media_type === 'tv'}· {seasonsLabel(entry.seasons) ?? 'series'}{/if}
                 {#if entry.unconfirmed}<span class="review">· in review</span>{/if}
               </span>
             </a>
@@ -368,6 +384,9 @@
         {#if t.series}
           <SeriesList id={t.series.id} current={t.tmdb_id ? [t.tmdb_id] : []} load={loadSeries} {readonly} />
         {/if}
+        {#if t.media_type === 'tv' && t.tmdb_id}
+          <SeasonList id={t.tmdb_id} load={loadShow} {readonly} />
+        {/if}
 
         <h3>On {current.items.length} disc{current.items.length === 1 ? '' : 's'}</h3>
         <ul class="discs">
@@ -379,6 +398,7 @@
                   <span class="text">
                     <strong>{item.format ?? 'Unknown format'}</strong>
                     {#if item.titles.length > 1}<span class="muted">{titleLine(item)}</span>{/if}
+                    {#if discSeasons(item, current)}<span class="muted">{discSeasons(item, current)}</span>{/if}
                   </span>
                 </div>
               {:else}
@@ -387,6 +407,7 @@
                   <span class="text">
                     <span><strong>{item.format ?? 'Unknown format'}</strong> <span class="muted">#{item.id}</span></span>
                     {#if item.titles.length > 1}<span class="muted">{titleLine(item)}</span>{/if}
+                    {#if discSeasons(item, current)}<span class="muted">{discSeasons(item, current)}</span>{/if}
                     {#if item.notes}<span class="muted">{item.notes}</span>{/if}
                     {#if item.status !== 'identified'}<span class="review">{statusLabel(item.status)}</span>{/if}
                   </span>

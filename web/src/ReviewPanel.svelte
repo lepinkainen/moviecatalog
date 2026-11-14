@@ -17,6 +17,7 @@
     type TMDBResult,
     type TitleEdit,
   } from './api';
+  import SeasonPicker from './SeasonPicker.svelte';
 
   let { item, onchanged }: { item: Item; onchanged: (item: Item) => void } = $props();
 
@@ -40,11 +41,16 @@
   const dirty = $derived(
     format !== (item.format ?? '') ||
       notes !== item.notes ||
-      JSON.stringify(titles.map(key)) !== JSON.stringify(item.titles.map(key)),
+      JSON.stringify(titles.map(editKey)) !== JSON.stringify(item.titles.map(editKey)),
   );
 
   function key(t: { tmdb_id: number | null; media_type: string; title: string }): string {
     return t.tmdb_id ? `${t.media_type}:${t.tmdb_id}` : `text:${t.title}`;
+  }
+
+  // A title with its seasons, to tell whether the form has changed.
+  function editKey(t: { tmdb_id: number | null; media_type: string; title: string; seasons?: number[] }): string {
+    return `${key(t)}|${t.media_type === 'tv' ? [...(t.seasons ?? [])].sort((a, b) => a - b).join(',') : ''}`;
   }
 
   function message(e: unknown): string {
@@ -99,7 +105,15 @@
   function addTyped() {
     const title = query.trim();
     if (!title) return;
-    const typed: TitleEdit = { tmdb_id: null, media_type: searchType, title, original_title: null, year: null, poster_path: null };
+    const typed: TitleEdit = {
+      tmdb_id: null,
+      media_type: searchType,
+      title,
+      original_title: null,
+      year: null,
+      poster_path: null,
+      seasons: [],
+    };
     if (!titles.some((t) => key(t) === key(typed))) titles.push(typed);
   }
 
@@ -195,6 +209,11 @@
             <span class="muted">· {t.media_type === 'tv' ? 'series' : 'movie'}{t.tmdb_id ? '' : ' · typed by hand'}</span>
           </span>
           <button onclick={() => titles.splice(i, 1)} aria-label="Remove {t.title}">Remove</button>
+          {#if t.media_type === 'tv'}
+            <div class="seasons">
+              <SeasonPicker tmdbId={t.tmdb_id} bind:seasons={() => t.seasons ?? [], (v) => (t.seasons = v)} />
+            </div>
+          {/if}
         </li>
       {:else}
         <li class="muted">No titles. Search below to add one.</li>
@@ -242,7 +261,7 @@
 
   <label class="field">
     <span class="name">Notes</span>
-    <input type="text" bind:value={notes} placeholder="For example: Season 2" />
+    <input type="text" bind:value={notes} placeholder="For example: Steelbook, region 1" />
   </label>
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -351,10 +370,15 @@
 
   .titles li {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: 0.4rem 0.75rem;
     overflow-wrap: anywhere;
+  }
+
+  .titles .seasons {
+    flex-basis: 100%;
   }
 
   .search {

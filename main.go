@@ -98,7 +98,8 @@ func runExport(log *slog.Logger, args []string) error {
 Writes index.html, data.json and assets/ into the output directory, replacing
 an earlier export there and leaving other files alone. Only identified discs
 are included, with their titles, formats and series; barcodes, notes, photos
-and the wishlist stay out. Set TMDB_API_KEY to include the series lists.
+and the wishlist stay out. Set TMDB_API_KEY to include the series and season
+lists.
 
 Flags:
 `)
@@ -137,7 +138,7 @@ Flags:
 	if err != nil {
 		return err
 	}
-	log.Info("exported", "dir", *out, "discs", sum.Items, "titles", sum.Titles, "series", sum.Series)
+	log.Info("exported", "dir", *out, "discs", sum.Items, "titles", sum.Titles, "series", sum.Series, "shows", sum.Shows)
 	return nil
 }
 

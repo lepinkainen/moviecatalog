@@ -11,7 +11,7 @@ import (
 func (fx *fixture) wish(t *testing.T, tmdbID int64, title string, at time.Time) {
 	t.Helper()
 	in := db.TitleInput{TMDBID: &tmdbID, MediaType: db.MediaMovie, Title: title}
-	if _, err := fx.store.CreateWant(context.Background(), in, db.WantEdit{Formats: db.WantFormats}, at); err != nil {
+	if _, err := fx.store.CreateWant(context.Background(), in, nil, db.WantEdit{Formats: db.WantFormats}, at); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -104,7 +104,36 @@ func TestLaterWishSurvivesOldDisc(t *testing.T) {
 	}
 	in := db.TitleInput{TMDBID: new(int64), MediaType: db.MediaMovie, Title: "Serenity"}
 	*in.TMDBID = 16320
-	if _, err := fx.store.CreateWant(context.Background(), in, db.WantEdit{Formats: db.WantFormats}, time.Now()); err != db.ErrExists {
+	if _, err := fx.store.CreateWant(context.Background(), in, nil, db.WantEdit{Formats: db.WantFormats}, time.Now()); err != db.ErrExists {
 		t.Errorf("wishing for an open wish again: err = %v, want ErrExists", err)
+	}
+}
+
+func TestSeasonDiscCollectsSeasonWish(t *testing.T) {
+	fx := newFixture(t)
+	vm := int64(1432)
+	two := 2
+	in := db.TitleInput{TMDBID: &vm, MediaType: db.MediaTV, Title: "Veronica Mars"}
+	if _, err := fx.store.CreateWant(context.Background(), in, &two, db.WantEdit{Formats: db.WantFormats},
+		time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	fx.fakes.results["tv|Veronica Mars|"] = []map[string]any{result(1432, "Veronica Mars", "2004-09-22")}
+	identify := func(seasons ...int) {
+		t.Helper()
+		fx.capture(t, nil)
+		fx.fakes.guess = tvGuess("Veronica Mars", seasons, false)
+		if err := fx.process(t); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	identify(1)
+	if got := fx.wishes(t); got["Veronica Mars"] != "" {
+		t.Errorf("after season 1: wishes = %v, want the season 2 wish still open", got)
+	}
+	identify(2, 3)
+	if got := fx.wishes(t); got["Veronica Mars"] != today() {
+		t.Errorf("after seasons 2–3: wishes = %v, want the season 2 wish collected today", got)
 	}
 }

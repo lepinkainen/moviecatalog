@@ -15,6 +15,8 @@ export interface Title {
   poster_path: string | null;
   /** The TMDB collection a movie belongs to, once looked up; "Indiana Jones". */
   series: { id: number; name: string } | null;
+  /** For a series: the seasons this disc holds; empty when it does not say. */
+  seasons: number[];
 }
 
 export interface Item {
@@ -57,6 +59,8 @@ export interface TitleEdit {
   original_title: string | null;
   year: number | null;
   poster_path: string | null;
+  /** For a series: the seasons on the disc. A TMDB search result has none. */
+  seasons?: number[];
 }
 
 /**
@@ -72,6 +76,7 @@ export function titleEdit(t: TitleEdit): TitleEdit {
     original_title: t.original_title,
     year: t.year,
     poster_path: t.poster_path,
+    seasons: t.media_type === 'tv' ? [...(t.seasons ?? [])] : [],
   };
 }
 
@@ -205,7 +210,7 @@ export interface SeriesPart {
   released: boolean;
   /** The library title of an owned movie. */
   title_id: number | null;
-  copies: { item_id: number; format: string | null; status: string }[];
+  copies: OwnedCopy[];
   /** On the wishlist. */
   wanted: boolean;
 }
@@ -216,6 +221,71 @@ export type SeriesLoader = (id: number) => Promise<Series | null>;
 export async function getSeries(id: number): Promise<Series> {
   const resp = await check(await fetch(`/api/series/${id}`));
   return resp.json();
+}
+
+/** A TMDB TV series with its seasons in order and the discs holding each. */
+export interface Show {
+  tmdb_id: number;
+  name: string;
+  original_name: string;
+  /** First air year. */
+  year: number | null;
+  /** TMDB's status: "Ended", "Returning Series", "Canceled", … */
+  status: string;
+  poster_path: string | null;
+  seasons: ShowSeason[];
+  /** Discs of the series whose notes do not say which seasons they hold. */
+  unsorted: OwnedCopy[];
+}
+
+export interface ShowSeason {
+  number: number;
+  name: string;
+  year: number | null;
+  episode_count: number;
+  poster_path: string | null;
+  /** False for an announced season, which does not count as missing. */
+  released: boolean;
+  copies: OwnedCopy[];
+  /** On the wishlist. */
+  wanted: boolean;
+}
+
+export type OwnedCopy = { item_id: number; format: string | null; status: string };
+
+/** Loads a series' seasons; null when they are not available (the static export without TMDB). */
+export type ShowLoader = (tmdbId: number) => Promise<Show | null>;
+
+export async function getShow(tmdbId: number): Promise<Show> {
+  const resp = await check(await fetch(`/api/shows/${tmdbId}`));
+  return resp.json();
+}
+
+/** "Seasons 1–3, 5" or "Season 2"; null when unknown. */
+export function seasonsLabel(seasons: number[]): string | null {
+  if (seasons.length === 0) return null;
+  const sorted = [...new Set(seasons)].sort((a, b) => a - b);
+  const ranges: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    ranges.push(j > i ? `${sorted[i]}–${sorted[j]}` : `${sorted[i]}`);
+    i = j;
+  }
+  return `${sorted.length === 1 ? 'Season' : 'Seasons'} ${ranges.join(', ')}`;
+}
+
+/** Reads a typed season list: "1-3, 5" → [1, 2, 3, 5]. Anything else is ignored. */
+export function parseSeasonList(text: string): number[] {
+  const seasons = new Set<number>();
+  for (const part of text.split(/[,\s&]+/)) {
+    const m = part.match(/^(\d+)(?:[-–](\d+))?$/);
+    if (!m) continue;
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    for (let n = from; n <= to && n <= 100; n++) seasons.add(n);
+  }
+  return [...seasons].sort((a, b) => a - b);
 }
 
 /** Ids of the other items a review reason points at ("same barcode as item #3"). */
@@ -256,6 +326,8 @@ export interface Offer {
 export interface Want {
   id: number;
   title: Title;
+  /** The one season of a series wished for; null for a movie or the whole series. */
+  season: number | null;
   formats: string[];
   max_price_cents: number | null;
   notes: string;
@@ -289,12 +361,15 @@ export async function listWants(): Promise<Wishlist> {
   return resp.json();
 }
 
-export async function createWant(title: TitleEdit, edit?: WantEdit): Promise<Want> {
+/** Adds a title, or with season one season of a series, to the wishlist. */
+export async function createWant(title: TitleEdit, edit?: WantEdit, season?: number): Promise<Want> {
+  // A wish's title has no seasons; the season is its own field.
+  const { seasons: _, ...wanted } = titleEdit(title);
   const resp = await check(
     await fetch('/api/wants', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: titleEdit(title), ...edit }),
+      body: JSON.stringify({ title: wanted, ...(season === undefined ? {} : { season }), ...edit }),
     }),
   );
   return resp.json();

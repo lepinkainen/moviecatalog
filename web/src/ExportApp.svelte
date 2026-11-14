@@ -1,6 +1,6 @@
 <script lang="ts">
   import Library from './Library.svelte';
-  import type { LibraryItem, Series } from './api';
+  import type { LibraryItem, Series, Show } from './api';
   import { parseLibraryHash, type LibraryRoute } from './route';
 
   /** data.json, written by `moviecatalog export`. */
@@ -10,6 +10,8 @@
     items: LibraryItem[];
     /** By TMDB collection id; empty when the export ran without TMDB. */
     series: Record<string, Series>;
+    /** By TMDB TV series id; empty (or missing in an older export) without TMDB. */
+    shows?: Record<string, Show>;
   }
 
   // Revalidated, so a new export shows without waiting for a cache to expire.
@@ -49,6 +51,7 @@
   readonly
   load={() => data.then((d) => d.items)}
   loadSeries={(id) => data.then((d) => d.series[id] ?? null)}
+  loadShow={(id) => data.then((d) => d.shows?.[id] ?? null)}
 />
 
 <footer class="muted">

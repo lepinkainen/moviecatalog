@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getItem, listRuns, statusLabel, thumb, type Item, type Run } from './api';
   import ReviewPanel from './ReviewPanel.svelte';
+  import SeasonList from './SeasonList.svelte';
   import SeriesList from './SeriesList.svelte';
 
   let { id }: { id: number } = $props();
@@ -131,9 +132,17 @@
         <SeriesList id={s.id} current={s.current} />
       </div>
     {/each}
+    {#each item.titles.filter((t) => t.media_type === 'tv' && t.tmdb_id) as t (t.id)}
+      <!-- Reloaded when the seasons change, so the copies are current. -->
+      {#key t.seasons.join(',')}
+        <div class="panel">
+          <SeasonList id={t.tmdb_id!} current={t.seasons} />
+        </div>
+      {/key}
+    {/each}
 
     <!-- Recreated whenever the stored item changes, so the form never shows stale values. -->
-    {#key `${item.status}|${item.format}|${item.notes}|${item.titles.map((t) => t.id).join(',')}`}
+    {#key `${item.status}|${item.format}|${item.notes}|${item.titles.map((t) => `${t.id}:${t.seasons.join('.')}`).join(',')}`}
       <ReviewPanel {item} onchanged={load} />
     {/key}
 

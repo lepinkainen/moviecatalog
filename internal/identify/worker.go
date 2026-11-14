@@ -149,7 +149,6 @@ func (w *Worker) process(ctx context.Context, item *db.Item) error {
 
 	// Step 3: match every title against TMDB.
 	ident := db.Identification{Format: guess.Format, Barcode: barcode, Confidence: guess.Confidence}
-	var notes []string
 	if guess.Confidence == "low" {
 		ident.ReviewReasons = append(ident.ReviewReasons, "low confidence")
 	}
@@ -168,19 +167,24 @@ func (w *Worker) process(ctx context.Context, item *db.Item) error {
 		} else {
 			ident.ReviewReasons = append(ident.ReviewReasons, fmt.Sprintf("no TMDB match for %q", gt.Title))
 		}
-		ident.Titles = append(ident.Titles, title)
-		if gt.Seasons != nil && *gt.Seasons != "" {
-			if len(guess.Titles) > 1 {
-				notes = append(notes, title.Title+": "+*gt.Seasons)
-			} else {
-				notes = append(notes, *gt.Seasons)
+		if gt.MediaType == db.MediaTV {
+			title.Seasons = gt.Seasons
+			if gt.CompleteSeries {
+				if match == nil {
+					ident.ReviewReasons = append(ident.ReviewReasons, fmt.Sprintf("%q is a complete series: tick its seasons", gt.Title))
+				} else {
+					aired, err := w.airedSeasons(ctx, item, match.ID)
+					if err != nil {
+						return err
+					}
+					title.Seasons = append(title.Seasons, aired...)
+				}
 			}
+			title.Seasons = db.NormalizeSeasons(title.Seasons)
 		}
+		ident.Titles = append(ident.Titles, title)
 	}
-	if guess.Notes != "" {
-		notes = append(notes, guess.Notes)
-	}
-	ident.Notes = strings.Join(notes, "; ")
+	ident.Notes = guess.Notes
 
 	if err := w.store.SaveIdentification(ctx, item.ID, item.Revision, ident); err != nil {
 		return err
@@ -254,6 +258,29 @@ func (w *Worker) readPhotos(ctx context.Context, item *db.Item) (*checkpoint, er
 		return nil, err
 	}
 	return cp, nil
+}
+
+// airedSeasons returns the seasons of a TMDB series that had aired by the
+// day the item was captured: what a complete-series box holds. Specials do
+// not count.
+func (w *Worker) airedSeasons(ctx context.Context, item *db.Item, tmdbID int64) ([]int, error) {
+	show, err := w.tmdb.Show(ctx, tmdbID)
+	run := db.Run{ItemID: item.ID, Step: "tmdb", Request: toJSON(object{"tv": tmdbID})}
+	if err != nil {
+		run.Error = err.Error()
+		w.record(ctx, run)
+		return nil, err
+	}
+	captured := item.CapturedAt.Local().Format("2006-01-02")
+	aired := []int{}
+	for _, s := range show.Seasons {
+		if s.Number > 0 && s.AirDate != "" && s.AirDate <= captured {
+			aired = append(aired, s.Number)
+		}
+	}
+	run.Response = toJSON(object{"complete_series_seasons": aired})
+	w.record(ctx, run)
+	return aired, nil
 }
 
 // match finds the TMDB entry for a title read off the case, or nil when there is none.

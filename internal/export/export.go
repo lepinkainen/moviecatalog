@@ -2,8 +2,9 @@
 // library page, its assets and a data.json holding the collection, ready to be
 // uploaded to any static web host.
 //
-// The site is public, so the data is an allowlist: titles, formats and series.
-// Barcodes, notes, photos, the wishlist and items still in review stay out.
+// The site is public, so the data is an allowlist: titles, formats, series
+// and seasons. Barcodes, notes, photos, the wishlist and items still in
+// review stay out.
 package export
 
 import (
@@ -35,9 +36,10 @@ const (
 	assetsDir = "assets"
 )
 
-// Collections looks up TMDB collections; *identify.TMDB satisfies it.
-type Collections interface {
+// TMDB looks up TMDB collections and TV series; *identify.TMDB satisfies it.
+type TMDB interface {
 	Collection(ctx context.Context, id int64) (*identify.Collection, error)
+	Show(ctx context.Context, id int64) (*identify.Show, error)
 }
 
 // Options configures an export.
@@ -46,9 +48,9 @@ type Options struct {
 	Dir string
 	// Title is the page's heading.
 	Title string
-	// TMDB fetches the series lists. Without it the series panels are left
-	// out; series names still group and search.
-	TMDB Collections
+	// TMDB fetches the series and season lists. Without it those panels are
+	// left out; series names still group and search.
+	TMDB TMDB
 	Now  time.Time
 }
 
@@ -59,6 +61,8 @@ type Data struct {
 	Items       []Item `json:"items"`
 	// Series maps a TMDB collection id to its movies.
 	Series map[int64]series.Series `json:"series"`
+	// Shows maps a TMDB TV series id to its seasons.
+	Shows map[int64]series.Show `json:"shows"`
 }
 
 // Item is one disc, shaped like the API's item so the library page can read it.
@@ -81,6 +85,8 @@ type Title struct {
 	Year          *int         `json:"year"`
 	PosterPath    *string      `json:"poster_path"`
 	Series        *TitleSeries `json:"series"`
+	// Seasons are the seasons of a series the disc holds.
+	Seasons []int `json:"seasons"`
 }
 
 // TitleSeries names the series a movie belongs to.
@@ -94,6 +100,7 @@ type Summary struct {
 	Items  int
 	Titles int
 	Series int
+	Shows  int
 }
 
 // Run writes the site into opts.Dir. assets holds the built export page
@@ -120,7 +127,7 @@ func Run(ctx context.Context, store *db.Store, assets fs.FS, opts Options, log *
 		return Summary{}, err
 	}
 
-	sum := Summary{Items: len(data.Items), Series: len(data.Series)}
+	sum := Summary{Items: len(data.Items), Series: len(data.Series), Shows: len(data.Shows)}
 	titles := map[int64]bool{}
 	for _, it := range data.Items {
 		for _, t := range it.Titles {
@@ -137,8 +144,8 @@ func collect(ctx context.Context, store *db.Store, opts Options, log *slog.Logge
 		return nil, err
 	}
 	data := &Data{Title: opts.Title, GeneratedAt: opts.Now.UTC().Format(time.RFC3339),
-		Items: []Item{}, Series: map[int64]series.Series{}}
-	var seriesIDs []int64
+		Items: []Item{}, Series: map[int64]series.Series{}, Shows: map[int64]series.Show{}}
+	var seriesIDs, showIDs []int64
 	for _, it := range all {
 		// Items in review may be wrong guesses, and waiting ones have no titles yet.
 		if it.Status != db.StatusIdentified || len(it.Titles) == 0 {
@@ -148,12 +155,16 @@ func collect(ctx context.Context, store *db.Store, opts Options, log *slog.Logge
 			Format: it.Format, Titles: make([]Title, 0, len(it.Titles))}
 		for _, t := range it.Titles {
 			title := Title{ID: t.ID, TMDBID: t.TMDBID, MediaType: t.MediaType, Title: t.Title,
-				OriginalTitle: t.OriginalTitle, Year: t.Year, PosterPath: t.PosterPath}
+				OriginalTitle: t.OriginalTitle, Year: t.Year, PosterPath: t.PosterPath,
+				Seasons: t.Seasons}
 			if t.Series != nil {
 				title.Series = &TitleSeries{ID: t.Series.ID, Name: t.Series.Name}
 				if !slices.Contains(seriesIDs, t.Series.ID) {
 					seriesIDs = append(seriesIDs, t.Series.ID)
 				}
+			}
+			if t.MediaType == db.MediaTV && t.TMDBID != nil && !slices.Contains(showIDs, *t.TMDBID) {
+				showIDs = append(showIDs, *t.TMDBID)
 			}
 			item.Titles = append(item.Titles, title)
 		}
@@ -161,8 +172,9 @@ func collect(ctx context.Context, store *db.Store, opts Options, log *slog.Logge
 	}
 
 	if opts.TMDB == nil {
-		if len(seriesIDs) > 0 {
-			log.Warn("TMDB_API_KEY is not set; the series lists are left out of the export", "series", len(seriesIDs))
+		if len(seriesIDs) > 0 || len(showIDs) > 0 {
+			log.Warn("TMDB_API_KEY is not set; the series and season lists are left out of the export",
+				"series", len(seriesIDs), "shows", len(showIDs))
 		}
 		return data, nil
 	}
@@ -183,6 +195,23 @@ func collect(ctx context.Context, store *db.Store, opts Options, log *slog.Logge
 		// Only discs the site shows, so every owned movie links to a card.
 		copies = slices.DeleteFunc(copies, func(c db.OwnedCopy) bool { return c.Status != db.StatusIdentified })
 		data.Series[id] = series.Assemble(c, copies, nil, opts.Now)
+	}
+	slices.Sort(showIDs)
+	for _, id := range showIDs {
+		show, err := opts.TMDB.Show(ctx, id)
+		if errors.Is(err, identify.ErrNotFound) {
+			log.Warn("TV series not found on TMDB; left out", "id", id)
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tv series %d: %w", id, err)
+		}
+		copies, err := store.ShowCopies(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		copies = slices.DeleteFunc(copies, func(c db.ShowCopy) bool { return c.Status != db.StatusIdentified })
+		data.Shows[id] = series.AssembleShow(show, copies, nil, opts.Now)
 	}
 	return data, nil
 }

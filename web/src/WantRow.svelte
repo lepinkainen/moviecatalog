@@ -90,7 +90,9 @@
   <div class="body">
     <div class="head">
       <h3>
-        {want.title.title}
+        {want.title.title}{#if want.season !== null}<span class="season"
+            >· {want.season === 0 ? 'Specials' : `Season ${want.season}`}</span
+          >{/if}
         {#if want.title.year}<span class="year">{want.title.year}</span>{/if}
       </h3>
       {#if want.owned_formats.length > 0}
@@ -235,6 +237,11 @@
   .year,
   .muted {
     color: var(--muted);
+    font-weight: normal;
+  }
+
+  .season {
+    margin-left: 0.3em;
     font-weight: normal;
   }
 

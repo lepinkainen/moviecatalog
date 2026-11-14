@@ -40,6 +40,8 @@ type TitleInput struct {
 	OriginalTitle string
 	Year          *int
 	PosterPath    *string
+	// Seasons are the seasons of a series the item holds; empty when it does not say.
+	Seasons []int
 }
 
 // Identification is the outcome of the pipeline for one item.
@@ -212,35 +214,84 @@ func findDuplicates(ctx context.Context, tx *sql.Tx, itemID int64, ident Identif
 	// Unmatched titles are unique rows, so only fully matched items can be compared.
 	if allMatched && ident.Format != "" {
 		rows, err := tx.QueryContext(ctx,
-			`SELECT it.item_id, it.title_id FROM item_titles it JOIN items i ON i.id = it.item_id
+			`SELECT it.item_id, it.title_id, t.media_type,
+			        (SELECT GROUP_CONCAT(s.season) FROM item_title_seasons s
+			          WHERE s.item_id = it.item_id AND s.title_id = it.title_id)
+			   FROM item_titles it JOIN items i ON i.id = it.item_id JOIN titles t ON t.id = it.title_id
 			  WHERE i.format = ? AND i.id != ? ORDER BY it.item_id`, ident.Format, itemID)
 		if err != nil {
 			return nil, fmt.Errorf("find duplicates: %w", err)
 		}
 		defer rows.Close()
+		mySeasons, err := itemSeasons(ctx, tx, itemID)
+		if err != nil {
+			return nil, err
+		}
 		others := map[int64][]int64{}
+		// differs says that another item holds other seasons of one of its series.
+		differs := map[int64]bool{}
 		var order []int64
 		for rows.Next() {
 			var other, title int64
-			if err := rows.Scan(&other, &title); err != nil {
+			var mediaType string
+			var seasons *string
+			if err := rows.Scan(&other, &title, &mediaType, &seasons); err != nil {
 				return nil, fmt.Errorf("find duplicates: %w", err)
 			}
 			if _, ok := others[other]; !ok {
 				order = append(order, other)
 			}
 			others[other] = append(others[other], title)
+			if mediaType == MediaTV && disjointSeasons(mySeasons[title], splitSeasons(seasons)) {
+				differs[other] = true
+			}
 		}
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("find duplicates: %w", err)
 		}
 		mine := titleKey(titleIDs)
 		for _, other := range order {
-			if !seen[other] && titleKey(others[other]) == mine {
+			// The Season 1 and Season 2 boxes are not the same release.
+			if !seen[other] && titleKey(others[other]) == mine && !differs[other] {
 				reasons = append(reasons, fmt.Sprintf("same titles and format as item #%d", other))
 			}
 		}
 	}
 	return reasons, nil
+}
+
+// itemSeasons returns the stored seasons of an item by title id.
+func itemSeasons(ctx context.Context, tx *sql.Tx, itemID int64) (map[int64][]int, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT title_id, season FROM item_title_seasons WHERE item_id = ? ORDER BY season`, itemID)
+	if err != nil {
+		return nil, fmt.Errorf("item seasons: %w", err)
+	}
+	defer rows.Close()
+	seasons := map[int64][]int{}
+	for rows.Next() {
+		var title int64
+		var season int
+		if err := rows.Scan(&title, &season); err != nil {
+			return nil, fmt.Errorf("item seasons: %w", err)
+		}
+		seasons[title] = append(seasons[title], season)
+	}
+	return seasons, rows.Err()
+}
+
+// splitSeasons parses a GROUP_CONCAT of season numbers.
+func splitSeasons(list *string) []int {
+	if list == nil {
+		return nil
+	}
+	var seasons []int
+	for _, part := range strings.Split(*list, ",") {
+		if n, err := strconv.Atoi(part); err == nil {
+			seasons = append(seasons, n)
+		}
+	}
+	return NormalizeSeasons(seasons)
 }
 
 func titleKey(ids []int64) string {

@@ -202,3 +202,58 @@ func (t *TMDB) Collection(ctx context.Context, id int64) (*Collection, error) {
 	}
 	return c, nil
 }
+
+// Show is a TMDB series with its seasons.
+type Show struct {
+	ID           int64
+	Name         string
+	OriginalName string
+	Year         *int   // first air year
+	Status       string // "Returning Series", "Ended", "Canceled", …
+	PosterPath   *string
+	Seasons      []ShowSeason
+}
+
+// ShowSeason is one season of a series. Season 0 holds the specials.
+type ShowSeason struct {
+	Number       int
+	Name         string
+	AirDate      string // "2004-09-22", or empty when not announced
+	Year         *int
+	EpisodeCount int
+	PosterPath   *string
+}
+
+// Show returns a series with its seasons, in TMDB's order.
+func (t *TMDB) Show(ctx context.Context, id int64) (*Show, error) {
+	what := fmt.Sprintf("tmdb tv %d", id)
+	body, err := t.get(ctx, "/tv/"+strconv.FormatInt(id, 10), nil, what)
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		ID           int64   `json:"id"`
+		Name         string  `json:"name"`
+		OriginalName string  `json:"original_name"`
+		FirstAirDate string  `json:"first_air_date"`
+		Status       string  `json:"status"`
+		PosterPath   *string `json:"poster_path"`
+		Seasons      []struct {
+			SeasonNumber int     `json:"season_number"`
+			Name         string  `json:"name"`
+			AirDate      string  `json:"air_date"`
+			EpisodeCount int     `json:"episode_count"`
+			PosterPath   *string `json:"poster_path"`
+		} `json:"seasons"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	s := &Show{ID: parsed.ID, Name: parsed.Name, OriginalName: parsed.OriginalName, Year: yearOf(parsed.FirstAirDate),
+		Status: parsed.Status, PosterPath: parsed.PosterPath}
+	for _, p := range parsed.Seasons {
+		s.Seasons = append(s.Seasons, ShowSeason{Number: p.SeasonNumber, Name: p.Name, AirDate: p.AirDate,
+			Year: yearOf(p.AirDate), EpisodeCount: p.EpisodeCount, PosterPath: p.PosterPath})
+	}
+	return s, nil
+}

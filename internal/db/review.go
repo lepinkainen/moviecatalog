@@ -64,7 +64,8 @@ func (s *Store) ApplyReview(ctx context.Context, itemID int64, edit ItemEdit) er
 	return tx.Commit()
 }
 
-// replaceTitles makes titles the complete list of what an item contains.
+// replaceTitles makes titles the complete list of what an item contains,
+// with the seasons of each series.
 // It returns the ids of the linked title rows and whether every title has
 // a TMDB match.
 func replaceTitles(ctx context.Context, tx *sql.Tx, itemID int64, titles []TitleInput) ([]int64, bool, error) {
@@ -100,6 +101,15 @@ func replaceTitles(ctx context.Context, tx *sql.Tx, itemID int64, titles []Title
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO item_titles (item_id, title_id, position) VALUES (?, ?, ?)`, itemID, id, pos); err != nil {
 			return nil, false, fmt.Errorf("link title %q: %w", t.Title, err)
+		}
+		if t.MediaType != MediaTV {
+			continue
+		}
+		for _, season := range NormalizeSeasons(t.Seasons) {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO item_title_seasons (item_id, title_id, season) VALUES (?, ?, ?)`, itemID, id, season); err != nil {
+				return nil, false, fmt.Errorf("save seasons of %q: %w", t.Title, err)
+			}
 		}
 	}
 	return ids, allMatched, nil

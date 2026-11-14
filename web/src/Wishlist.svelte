@@ -28,9 +28,12 @@
   onMount(load);
 
   const wished = $derived(
-    // A collected title can be wished for again (an upgrade).
+    // A collected title can be wished for again (an upgrade). A season wish
+    // does not stand for the whole series.
     new Set(
-      (wishlist?.wants ?? []).filter((w) => !w.collected_on).map((w) => `${w.title.media_type}:${w.title.tmdb_id}`),
+      (wishlist?.wants ?? [])
+        .filter((w) => !w.collected_on && w.season === null)
+        .map((w) => `${w.title.media_type}:${w.title.tmdb_id}`),
     ),
   );
 

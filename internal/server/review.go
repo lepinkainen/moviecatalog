@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -23,6 +24,8 @@ type titleEdit struct {
 	OriginalTitle *string `json:"original_title"`
 	Year          *int    `json:"year"`
 	PosterPath    *string `json:"poster_path"`
+	// Seasons are the seasons of a series on the item.
+	Seasons []int `json:"seasons"`
 }
 
 type itemEdit struct {
@@ -62,7 +65,18 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, r *http.Request) {
 				s.writeError(w, http.StatusBadRequest, "media_type must be movie or tv")
 				return
 			}
-			in := db.TitleInput{TMDBID: t.TMDBID, MediaType: t.MediaType, Title: t.Title, Year: t.Year, PosterPath: t.PosterPath}
+			if len(t.Seasons) > 0 && t.MediaType != db.MediaTV {
+				s.writeError(w, http.StatusBadRequest, "only a series has seasons")
+				return
+			}
+			for _, n := range t.Seasons {
+				if n < 0 || n > db.MaxSeason {
+					s.writeError(w, http.StatusBadRequest, fmt.Sprintf("seasons must be between 0 and %d", db.MaxSeason))
+					return
+				}
+			}
+			in := db.TitleInput{TMDBID: t.TMDBID, MediaType: t.MediaType, Title: t.Title, Year: t.Year,
+				PosterPath: t.PosterPath, Seasons: t.Seasons}
 			if t.OriginalTitle != nil {
 				in.OriginalTitle = *t.OriginalTitle
 			}

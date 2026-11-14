@@ -25,11 +25,21 @@ var testAssets = fstest.MapFS{
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-type fakeTMDB map[int64]*identify.Collection
+type fakeTMDB struct {
+	collections map[int64]*identify.Collection
+	shows       map[int64]*identify.Show
+}
 
 func (f fakeTMDB) Collection(_ context.Context, id int64) (*identify.Collection, error) {
-	if c, ok := f[id]; ok {
+	if c, ok := f.collections[id]; ok {
 		return c, nil
+	}
+	return nil, identify.ErrNotFound
+}
+
+func (f fakeTMDB) Show(_ context.Context, id int64) (*identify.Show, error) {
+	if s, ok := f.shows[id]; ok {
+		return s, nil
 	}
 	return nil, identify.ErrNotFound
 }
@@ -91,6 +101,13 @@ func seed(t *testing.T, store *db.Store) {
 
 	newItem(t, store) // waiting for identification
 
+	// Veronica Mars season 1.
+	vm := newItem(t, store)
+	if err := store.ApplyReview(ctx, vm.ID, db.ItemEdit{Format: ptr("DVD"),
+		Titles: &[]db.TitleInput{{TMDBID: ptr(int64(1432)), MediaType: db.MediaTV, Title: "Veronica Mars", Seasons: []int{1}}}}); err != nil {
+		t.Fatal(err)
+	}
+
 	odd := newItem(t, store)
 	if err := store.ApplyReview(ctx, odd.ID, db.ItemEdit{Format: ptr("Blu-ray"),
 		Titles: &[]db.TitleInput{{MediaType: db.MediaMovie, Title: "</script><script>alert(1)</script>"}}}); err != nil {
@@ -113,10 +130,16 @@ func seed(t *testing.T, store *db.Store) {
 	}
 }
 
-var indy = fakeTMDB{84: {ID: 84, Name: "Indiana Jones Collection", Parts: []identify.CollectionPart{
-	{ID: 87, Title: "Indiana Jones and the Temple of Doom", ReleaseDate: "1984-05-23", Year: ptr(1984)},
-	{ID: 85, Title: "Raiders of the Lost Ark", ReleaseDate: "1981-06-12", Year: ptr(1981)},
-}}}
+var indy = fakeTMDB{
+	collections: map[int64]*identify.Collection{84: {ID: 84, Name: "Indiana Jones Collection", Parts: []identify.CollectionPart{
+		{ID: 87, Title: "Indiana Jones and the Temple of Doom", ReleaseDate: "1984-05-23", Year: ptr(1984)},
+		{ID: 85, Title: "Raiders of the Lost Ark", ReleaseDate: "1981-06-12", Year: ptr(1981)},
+	}}},
+	shows: map[int64]*identify.Show{1432: {ID: 1432, Name: "Veronica Mars", Status: "Ended", Seasons: []identify.ShowSeason{
+		{Number: 1, Name: "Season 1", AirDate: "2004-09-22"},
+		{Number: 2, Name: "Season 2", AirDate: "2005-09-28"},
+	}}},
+}
 
 func readData(t *testing.T, dir string) (Data, string) {
 	t.Helper()
@@ -142,7 +165,7 @@ func TestRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum != (Summary{Items: 3, Titles: 2, Series: 1}) {
+	if sum != (Summary{Items: 4, Titles: 3, Series: 1, Shows: 1}) {
 		t.Errorf("summary = %+v", sum)
 	}
 
@@ -161,9 +184,9 @@ func TestRun(t *testing.T) {
 	if data.Title != "My discs" || data.GeneratedAt != "2026-11-12T12:00:00Z" {
 		t.Errorf("title, generated_at = %q, %q", data.Title, data.GeneratedAt)
 	}
-	// Only identified discs: both Raiders and the hand-typed one.
-	if len(data.Items) != 3 {
-		t.Fatalf("items = %+v, want 3", data.Items)
+	// Only identified discs: both Raiders, Veronica Mars and the hand-typed one.
+	if len(data.Items) != 4 {
+		t.Fatalf("items = %+v, want 4", data.Items)
 	}
 	for _, it := range data.Items {
 		if it.Status != db.StatusIdentified {
@@ -197,6 +220,23 @@ func TestRun(t *testing.T) {
 	// Temple of Doom is in review, so the site says it is not owned.
 	if temple := s.Parts[1]; len(temple.Copies) != 0 || temple.TitleID != nil {
 		t.Errorf("Temple of Doom = %+v, want no copies", temple)
+	}
+
+	// The seasons come along.
+	var seasons []int
+	for _, it := range data.Items {
+		for _, ti := range it.Titles {
+			if ti.MediaType == db.MediaTV {
+				seasons = ti.Seasons
+			}
+		}
+	}
+	if len(seasons) != 1 || seasons[0] != 1 {
+		t.Errorf("Veronica Mars seasons = %v, want [1]", seasons)
+	}
+	show, ok := data.Shows[1432]
+	if !ok || len(show.Seasons) != 2 || len(show.Seasons[0].Copies) != 1 || len(show.Seasons[1].Copies) != 0 {
+		t.Errorf("shows = %+v, want Veronica Mars with season 1 owned", data.Shows)
 	}
 }
 

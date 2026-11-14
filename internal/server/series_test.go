@@ -118,3 +118,96 @@ func TestSeriesWithoutKey(t *testing.T) {
 		t.Errorf("status = %d, want 503 when no TMDB key is configured", resp.StatusCode)
 	}
 }
+
+func TestShow(t *testing.T) {
+	fetches := 0
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tv/1432" {
+			http.NotFound(w, r)
+			return
+		}
+		fetches++
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": 1432, "name": "Veronica Mars", "status": "Ended",
+			"seasons": []map[string]any{
+				{"season_number": 0, "name": "Specials", "air_date": "2004-09-01", "episode_count": 2},
+				{"season_number": 1, "name": "Season 1", "air_date": "2004-09-22", "episode_count": 22},
+				{"season_number": 2, "name": "Season 2", "air_date": "2005-09-28", "episode_count": 22},
+				{"season_number": 3, "name": "Season 3", "air_date": "2006-10-03", "episode_count": 20},
+				{"season_number": 5, "name": "Season 5", "air_date": "", "episode_count": 0},
+			},
+		})
+	}))
+	t.Cleanup(fake.Close)
+
+	dataDir := t.TempDir()
+	store, err := db.Open(filepath.Join(dataDir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	srv := New(store, dataDir, testUI, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.SetTMDB(&identify.TMDB{APIKey: "k", BaseURL: fake.URL, HTTP: fake.Client()})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	ctx := context.Background()
+	own := func(format string, seasons ...int) int64 {
+		item, err := store.CreateItem(ctx, time.Now(), func(int64) ([]db.NewImage, error) { return nil, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := int64(1432)
+		titles := []db.TitleInput{{TMDBID: &id, MediaType: db.MediaTV, Title: "Veronica Mars", Seasons: seasons}}
+		if err := store.ApplyReview(ctx, item.ID, db.ItemEdit{Format: &format, Titles: &titles}); err != nil {
+			t.Fatal(err)
+		}
+		return item.ID
+	}
+	s1 := own("DVD", 1)
+	s3 := own("DVD", 3, 4)
+	unsorted := own("Blu-ray")
+	vm, two := int64(1432), 2
+	if _, err := store.CreateWant(ctx, db.TitleInput{TMDBID: &vm, MediaType: db.MediaTV, Title: "Veronica Mars"}, &two,
+		db.WantEdit{Formats: db.WantFormats}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decode[series.Show](t, get(t, ts.URL+"/api/shows/1432"))
+	if got.Name != "Veronica Mars" || got.Status != "Ended" {
+		t.Errorf("show = %q (%q)", got.Name, got.Status)
+	}
+	type row struct {
+		number, copies int
+		released       bool
+	}
+	want := []row{{1, 1, true}, {2, 0, true}, {3, 1, true}, {4, 1, true}, {5, 0, false}}
+	if len(got.Seasons) != len(want) {
+		t.Fatalf("seasons = %+v, want %d (no unowned specials, season 4 added from the disc)", got.Seasons, len(want))
+	}
+	for i, w := range want {
+		s := got.Seasons[i]
+		if s.Number != w.number || len(s.Copies) != w.copies || s.Released != w.released {
+			t.Errorf("season %d = %+v, want %+v", i, s, w)
+		}
+	}
+	if got.Seasons[0].Copies[0].ItemID != s1 || got.Seasons[2].Copies[0].ItemID != s3 {
+		t.Errorf("seasons 1 and 3 copies = %+v, %+v", got.Seasons[0].Copies, got.Seasons[2].Copies)
+	}
+	for _, season := range got.Seasons {
+		if season.Wanted != (season.Number == 2) {
+			t.Errorf("season %d wanted = %v, want only season 2 on the wishlist", season.Number, season.Wanted)
+		}
+	}
+	if len(got.Unsorted) != 1 || got.Unsorted[0].ItemID != unsorted {
+		t.Errorf("unsorted = %+v, want the disc without seasons", got.Unsorted)
+	}
+
+	get(t, ts.URL+"/api/shows/1432")
+	if fetches != 1 {
+		t.Errorf("TMDB fetched %d times, want the cached series reused", fetches)
+	}
+	if resp := get(t, ts.URL+"/api/shows/1"); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown series: status = %d, want 404", resp.StatusCode)
+	}
+}

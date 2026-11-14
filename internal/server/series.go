@@ -11,39 +11,39 @@ import (
 	"github.com/lepinkainen/moviecatalog/internal/series"
 )
 
-// seriesCacheTTL is how long a TMDB collection is reused. Collections change
-// rarely: a sequel is announced or gets its release date.
-const seriesCacheTTL = 24 * time.Hour
+// tmdbCacheTTL is how long a TMDB collection or series is reused. They
+// change rarely: a sequel or season is announced or gets its release date.
+const tmdbCacheTTL = 24 * time.Hour
 
-// seriesCache keeps fetched TMDB collections in memory.
-type seriesCache struct {
+// tmdbCache keeps fetched TMDB collections or series in memory.
+type tmdbCache[T any] struct {
 	mu      sync.Mutex
-	entries map[int64]seriesCacheEntry
+	entries map[int64]tmdbCacheEntry[T]
 }
 
-type seriesCacheEntry struct {
-	collection *identify.Collection
-	fetchedAt  time.Time
+type tmdbCacheEntry[T any] struct {
+	value     T
+	fetchedAt time.Time
 }
 
-func (c *seriesCache) get(ctx context.Context, tmdb *identify.TMDB, id int64, now time.Time) (*identify.Collection, error) {
+func (c *tmdbCache[T]) get(ctx context.Context, id int64, now time.Time, fetch func(context.Context, int64) (T, error)) (T, error) {
 	c.mu.Lock()
 	e, ok := c.entries[id]
 	c.mu.Unlock()
-	if ok && now.Sub(e.fetchedAt) < seriesCacheTTL {
-		return e.collection, nil
+	if ok && now.Sub(e.fetchedAt) < tmdbCacheTTL {
+		return e.value, nil
 	}
-	collection, err := tmdb.Collection(ctx, id)
+	value, err := fetch(ctx, id)
 	if err != nil {
-		return nil, err
+		return value, err
 	}
 	c.mu.Lock()
 	if c.entries == nil {
-		c.entries = map[int64]seriesCacheEntry{}
+		c.entries = map[int64]tmdbCacheEntry[T]{}
 	}
-	c.entries[id] = seriesCacheEntry{collection, now}
+	c.entries[id] = tmdbCacheEntry[T]{value, now}
 	c.mu.Unlock()
-	return collection, nil
+	return value, nil
 }
 
 // handleGetSeries returns a TMDB collection with the movies in release order,
@@ -58,7 +58,7 @@ func (s *Server) handleGetSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	collection, err := s.series.get(r.Context(), s.tmdb, id, now)
+	collection, err := s.series.get(r.Context(), id, now, s.tmdb.Collection)
 	if errors.Is(err, identify.ErrNotFound) {
 		s.writeError(w, http.StatusNotFound, "series not found")
 		return
@@ -72,6 +72,38 @@ func (s *Server) handleGetSeries(w http.ResponseWriter, r *http.Request) {
 	resp, err := series.Build(r.Context(), s.store, collection, now)
 	if err != nil {
 		s.log.Error("series discs", "id", id, "error", err)
+		s.writeError(w, http.StatusInternalServerError, "could not load the series")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// handleGetShow returns a TMDB series with its seasons in order, each with
+// the discs it is on.
+func (s *Server) handleGetShow(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.pathID(w, r)
+	if !ok {
+		return
+	}
+	if s.tmdb == nil {
+		s.writeError(w, http.StatusServiceUnavailable, "seasons need TMDB (TMDB_API_KEY is not set)")
+		return
+	}
+	now := time.Now()
+	show, err := s.shows.get(r.Context(), id, now, s.tmdb.Show)
+	if errors.Is(err, identify.ErrNotFound) {
+		s.writeError(w, http.StatusNotFound, "series not found")
+		return
+	}
+	if err != nil {
+		s.log.Error("tmdb tv", "id", id, "error", err)
+		s.writeError(w, http.StatusBadGateway, "could not load the series from TMDB")
+		return
+	}
+
+	resp, err := series.BuildShow(r.Context(), s.store, show, now)
+	if err != nil {
+		s.log.Error("show discs", "id", id, "error", err)
 		s.writeError(w, http.StatusInternalServerError, "could not load the series")
 		return
 	}

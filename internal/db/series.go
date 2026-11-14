@@ -143,3 +143,67 @@ func (s *Store) WantedMovies(ctx context.Context, tmdbIDs []int64) (map[int64]bo
 	}
 	return wanted, nil
 }
+
+// WantedSeasons returns which seasons of a TMDB series are on the wishlist
+// and not yet collected.
+func (s *Store) WantedSeasons(ctx context.Context, tmdbID int64) (map[int]bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT w.season FROM wants w JOIN titles t ON t.id = w.title_id
+		  WHERE w.collected_on IS NULL AND w.season IS NOT NULL AND t.media_type = ? AND t.tmdb_id = ?`,
+		MediaTV, tmdbID)
+	if err != nil {
+		return nil, fmt.Errorf("wanted seasons: %w", err)
+	}
+	defer rows.Close()
+	wanted := map[int]bool{}
+	for rows.Next() {
+		var season int
+		if err := rows.Scan(&season); err != nil {
+			return nil, fmt.Errorf("wanted seasons: %w", err)
+		}
+		wanted[season] = true
+	}
+	return wanted, rows.Err()
+}
+
+// ShowCopy is one disc holding seasons of a series.
+type ShowCopy struct {
+	OwnedCopy
+	// Seasons are the seasons the item holds; empty when it does not say.
+	Seasons []int
+}
+
+// ShowCopies returns the discs holding a TMDB series, best format first,
+// with the seasons each holds. Items still waiting for identification are
+// left out, as in the library.
+func (s *Store) ShowCopies(ctx context.Context, tmdbID int64) ([]ShowCopy, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT t.id, t.tmdb_id, i.id, i.format, i.status,
+		        (SELECT GROUP_CONCAT(s.season) FROM item_title_seasons s
+		          WHERE s.item_id = i.id AND s.title_id = t.id)
+		   FROM titles t
+		   JOIN item_titles it ON it.title_id = t.id
+		   JOIN items i ON i.id = it.item_id
+		  WHERE t.media_type = ? AND t.tmdb_id = ? AND i.status != ?
+		  ORDER BY CASE i.format WHEN 'UHD' THEN 0 WHEN 'Blu-ray' THEN 1 WHEN 'DVD' THEN 2 ELSE 3 END, i.id`,
+		MediaTV, tmdbID, StatusCaptured)
+	if err != nil {
+		return nil, fmt.Errorf("show copies: %w", err)
+	}
+	defer rows.Close()
+
+	var copies []ShowCopy
+	for rows.Next() {
+		var c ShowCopy
+		var seasons *string
+		if err := rows.Scan(&c.TitleID, &c.TMDBID, &c.ItemID, &c.Format, &c.Status, &seasons); err != nil {
+			return nil, fmt.Errorf("show copies: %w", err)
+		}
+		c.Seasons = splitSeasons(seasons)
+		copies = append(copies, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("show copies: %w", err)
+	}
+	return copies, nil
+}

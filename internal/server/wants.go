@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -131,6 +132,8 @@ func (b wantEditBody) validate() (db.WantEdit, string) {
 
 type createWantBody struct {
 	Title titleEdit `json:"title"`
+	// Season wishes for one season of a series instead of all of it.
+	Season *int `json:"season"`
 	wantEditBody
 }
 
@@ -150,6 +153,10 @@ func (s *Server) handleCreateWant(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "media_type must be movie or tv")
 		return
 	}
+	if body.Season != nil && (t.MediaType != db.MediaTV || *body.Season < 0 || *body.Season > db.MaxSeason) {
+		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("season must be between 0 and %d, for a series", db.MaxSeason))
+		return
+	}
 	edit, msg := body.validate()
 	if msg != "" {
 		s.writeError(w, http.StatusBadRequest, msg)
@@ -159,7 +166,7 @@ func (s *Server) handleCreateWant(w http.ResponseWriter, r *http.Request) {
 	if t.OriginalTitle != nil {
 		in.OriginalTitle = *t.OriginalTitle
 	}
-	want, err := s.store.CreateWant(r.Context(), in, edit, time.Now())
+	want, err := s.store.CreateWant(r.Context(), in, body.Season, edit, time.Now())
 	if errors.Is(err, db.ErrExists) {
 		s.writeError(w, http.StatusConflict, "already on the wishlist")
 		return

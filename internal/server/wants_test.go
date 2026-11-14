@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,8 @@ func TestWishlistRejectsBadInput(t *testing.T) {
 		"negative cap":   `{"title": ` + upTitle + `, "max_price_cents": -1}`,
 		"unknown field":  `{"title": ` + upTitle + `, "price": 10}`,
 		"bad media type": `{"title": {"tmdb_id": 1, "media_type": "game", "title": "Up"}}`,
+		"movie season":   `{"title": ` + upTitle + `, "season": 2}`,
+		"bad season":     `{"title": ` + vmTitle + `, "season": 1999}`,
 	} {
 		if resp := send(t, http.MethodPost, ts.URL+"/api/wants", body); resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", name, resp.StatusCode)
@@ -324,5 +327,42 @@ func TestCollectedWish(t *testing.T) {
 	}
 	if got := decode[syncResponse](t, get(t, ts.URL+"/api/sync")); len(got.Wanted) != 0 || len(got.Owned) != 1 {
 		t.Errorf("sync = %+v, want Up owned and not wanted", got)
+	}
+}
+
+const vmTitle = `{"tmdb_id": 1432, "media_type": "tv", "title": "Veronica Mars"}`
+
+func TestSeasonWishes(t *testing.T) {
+	ts, _ := newWishlistServer(t, nil)
+
+	// Seasons 3 and 4 and the whole series are separate wishes.
+	for _, body := range []string{
+		`{"title": ` + vmTitle + `, "season": 4}`,
+		`{"title": ` + vmTitle + `, "season": 3}`,
+		`{"title": ` + vmTitle + `}`,
+	} {
+		if resp := send(t, http.MethodPost, ts.URL+"/api/wants", body); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("create %s: status = %d, want 201", body, resp.StatusCode)
+		}
+	}
+	if resp := send(t, http.MethodPost, ts.URL+"/api/wants", `{"title": `+vmTitle+`, "season": 4}`); resp.StatusCode != http.StatusConflict {
+		t.Errorf("the same season again: status = %d, want 409", resp.StatusCode)
+	}
+
+	list := decode[wishlistResponse](t, get(t, ts.URL+"/api/wants"))
+	var seasons []string
+	for _, w := range list.Wants {
+		if w.Season == nil {
+			seasons = append(seasons, "all")
+		} else {
+			seasons = append(seasons, strconv.Itoa(*w.Season))
+		}
+	}
+	if strings.Join(seasons, ",") != "all,3,4" {
+		t.Errorf("wishes = %v, want the whole series and seasons 3 and 4, newest first", seasons)
+	}
+	// Series are not shop items: nothing goes to the watcher.
+	if sync := decode[syncResponse](t, get(t, ts.URL+"/api/sync")); len(sync.Wanted) != 0 {
+		t.Errorf("sync wanted = %+v, want no series", sync.Wanted)
 	}
 }

@@ -64,6 +64,8 @@ type Title struct {
 	PosterPath    *string `json:"poster_path"`
 	// Series is the TMDB collection the movie belongs to, once it has been looked up.
 	Series *Series `json:"series"`
+	// Seasons are the seasons of a series this item holds; empty when it does not say.
+	Seasons []int `json:"seasons"`
 }
 
 // Image is a stored photo of an item.
@@ -256,7 +258,9 @@ func (s *Store) queryImages(ctx context.Context, clause string, args ...any) ([]
 func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]Title, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT t.id, it.item_id, t.tmdb_id, t.media_type, t.title, t.original_title, t.year, t.poster_path,
-		        t.collection_id, t.collection_name
+		        t.collection_id, t.collection_name,
+		        (SELECT GROUP_CONCAT(s.season) FROM item_title_seasons s
+		          WHERE s.item_id = it.item_id AND s.title_id = it.title_id)
 		   FROM item_titles it JOIN titles t ON t.id = it.title_id `+clause, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query titles: %w", err)
@@ -267,14 +271,15 @@ func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]
 	for rows.Next() {
 		var t Title
 		var collectionID *int64
-		var collectionName *string
+		var collectionName, seasons *string
 		if err := rows.Scan(&t.ID, &t.ItemID, &t.TMDBID, &t.MediaType, &t.Title, &t.OriginalTitle, &t.Year, &t.PosterPath,
-			&collectionID, &collectionName); err != nil {
+			&collectionID, &collectionName, &seasons); err != nil {
 			return nil, fmt.Errorf("query titles: %w", err)
 		}
 		if collectionID != nil && collectionName != nil {
 			t.Series = &Series{ID: *collectionID, Name: SeriesName(*collectionName)}
 		}
+		t.Seasons = splitSeasons(seasons)
 		titles = append(titles, t)
 	}
 	if err := rows.Err(); err != nil {

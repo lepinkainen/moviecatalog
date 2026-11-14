@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -304,7 +305,21 @@ func TestManualCorrection(t *testing.T) {
 		t.Errorf("after format-only patch: %q %q %d titles; want UHD, notes and titles kept", *item.Format, item.Notes, len(item.Titles))
 	}
 
+	// A series with its seasons, sorted and without repeats; replacing the titles replaces them.
+	item = decode[db.Item](t, patchItem(t, itemURL, `{"titles":[
+		{"tmdb_id":1432,"media_type":"tv","title":"Veronica Mars","seasons":[3,1,3]}]}`))
+	if len(item.Titles) != 1 || fmt.Sprint(item.Titles[0].Seasons) != "[1 3]" {
+		t.Errorf("series titles = %+v, want seasons [1 3]", item.Titles)
+	}
+	item = decode[db.Item](t, patchItem(t, itemURL, `{"titles":[
+		{"tmdb_id":1432,"media_type":"tv","title":"Veronica Mars","seasons":[2]}]}`))
+	if fmt.Sprint(item.Titles[0].Seasons) != "[2]" {
+		t.Errorf("after replacing: seasons = %v, want [2]", item.Titles[0].Seasons)
+	}
+
 	for name, body := range map[string]string{
+		"movie seasons":  `{"titles":[{"tmdb_id":603,"media_type":"movie","title":"The Matrix","seasons":[1]}]}`,
+		"bad season":     `{"titles":[{"tmdb_id":1432,"media_type":"tv","title":"Veronica Mars","seasons":[1999]}]}`,
 		"unknown format": `{"format":"VHS"}`,
 		"empty title":    `{"titles":[{"tmdb_id":null,"media_type":"movie","title":" "}]}`,
 		"bad media type": `{"titles":[{"tmdb_id":1,"media_type":"book","title":"X"}]}`,

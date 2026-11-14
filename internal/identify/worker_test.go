@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,6 +45,10 @@ type fakes struct {
 	// movies not in it are not found. movieStatus fails the lookup when set.
 	collections map[string]any
 	movieStatus int
+	// shows maps a TMDB series id to its seasons as [number, air date] pairs;
+	// showStatus fails the lookup when set.
+	shows      map[string][][2]any
+	showStatus int
 }
 
 func (f *fakes) handler() http.Handler {
@@ -113,6 +118,23 @@ func (f *fakes) handler() http.Handler {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{"id": r.PathValue("id"), "belongs_to_collection": collection})
+	})
+	mux.HandleFunc("GET /tv/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if f.showStatus != 0 {
+			http.Error(w, `{"status_message":"boom"}`, f.showStatus)
+			return
+		}
+		seasons, ok := f.shows[r.PathValue("id")]
+		if !ok {
+			http.Error(w, `{"status_message":"not found"}`, http.StatusNotFound)
+			return
+		}
+		var list []map[string]any
+		for _, s := range seasons {
+			list = append(list, map[string]any{"season_number": s[0], "air_date": s[1], "name": "Season"})
+		}
+		id, _ := strconv.Atoi(r.PathValue("id"))
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "seasons": list})
 	})
 	return mux
 }
@@ -363,12 +385,15 @@ func TestIdentifyWithoutPriceRecordsTokensOnly(t *testing.T) {
 	}
 }
 
-func TestIdentifySeriesKeepsSeasonsInNotes(t *testing.T) {
+func tvGuess(title string, seasons []int, complete bool) Guess {
+	return Guess{Format: "DVD", Confidence: "high", Titles: []GuessTitle{
+		{MediaType: "tv", Title: title, OriginalTitle: title, Year: intp(2003), Seasons: seasons, CompleteSeries: complete}}}
+}
+
+func TestIdentifySeriesStoresSeasons(t *testing.T) {
 	fx := newFixture(t)
 	id := fx.capture(t, nil)
-	seasons := "Season 2"
-	fx.fakes.guess = Guess{Format: "DVD", Confidence: "high", Titles: []GuessTitle{
-		{MediaType: "tv", Title: "Firefly", OriginalTitle: "Firefly", Year: intp(2003), Seasons: &seasons}}}
+	fx.fakes.guess = tvGuess("Firefly", []int{2, 1, 2}, false)
 	// Series are searched without a year: the year on a season box is not the first-air year.
 	fx.fakes.results["tv|Firefly|"] = []map[string]any{result(1437, "Firefly", "2002-09-20")}
 
@@ -376,11 +401,88 @@ func TestIdentifySeriesKeepsSeasonsInNotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	item := fx.item(t, id)
-	if item.Status != db.StatusIdentified || item.Notes != "Season 2" {
-		t.Errorf("status %q notes %q; want identified with notes \"Season 2\"", item.Status, item.Notes)
+	if item.Status != db.StatusIdentified || item.Notes != "" {
+		t.Errorf("status %q notes %q; want identified with no notes", item.Status, item.Notes)
 	}
 	if len(item.Titles) != 1 || item.Titles[0].MediaType != "tv" || *item.Titles[0].Year != 2002 {
-		t.Errorf("titles = %+v, want the series with first-air year 2002", item.Titles)
+		t.Fatalf("titles = %+v, want the series with first-air year 2002", item.Titles)
+	}
+	if got := item.Titles[0].Seasons; !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("seasons = %v, want [1 2]", got)
+	}
+}
+
+func TestIdentifyCompleteSeries(t *testing.T) {
+	t.Run("holds the seasons aired by the capture", func(t *testing.T) {
+		fx := newFixture(t)
+		id := fx.capture(t, nil)
+		fx.fakes.guess = tvGuess("Veronica Mars", nil, true)
+		fx.fakes.results["tv|Veronica Mars|"] = []map[string]any{result(1432, "Veronica Mars", "2004-09-22")}
+		fx.fakes.shows = map[string][][2]any{"1432": {
+			{0, "2004-09-01"}, {1, "2004-09-22"}, {2, "2005-09-28"}, {3, "2006-10-03"}, {4, "2999-07-26"}, {5, ""}}}
+		fx.fakes.showStatus = http.StatusServiceUnavailable
+
+		// An outage is retried without using up attempts or reading the covers again.
+		for range maxAttempts + 1 {
+			if err := fx.process(t); err == nil {
+				t.Fatal("expected the TMDB failure")
+			}
+		}
+		if item := fx.item(t, id); item.Status != db.StatusCaptured {
+			t.Fatalf("after the outage: status %q (%s), want still captured", item.Status, deref(item.ReviewReason))
+		}
+		fx.fakes.showStatus = 0
+		if err := fx.process(t); err != nil {
+			t.Fatal(err)
+		}
+		item := fx.item(t, id)
+		if item.Status != db.StatusIdentified || !slices.Equal(item.Titles[0].Seasons, []int{1, 2, 3}) {
+			t.Errorf("status %q seasons %v; want identified with seasons 1–3", item.Status, item.Titles[0].Seasons)
+		}
+		if fx.fakes.identifies != 1 {
+			t.Errorf("covers were read %d times, want once", fx.fakes.identifies)
+		}
+	})
+
+	t.Run("without a TMDB match goes to review", func(t *testing.T) {
+		fx := newFixture(t)
+		id := fx.capture(t, nil)
+		fx.fakes.guess = tvGuess("Obscure Show", nil, true)
+		if err := fx.process(t); err != nil {
+			t.Fatal(err)
+		}
+		if item := fx.item(t, id); item.Status != db.StatusNeedsReview || !strings.Contains(deref(item.ReviewReason), "tick its seasons") {
+			t.Errorf("status %q reason %q; want needs_review asking for the seasons", item.Status, deref(item.ReviewReason))
+		}
+	})
+}
+
+func TestIdentifySeasonsAreNotDuplicates(t *testing.T) {
+	fx := newFixture(t)
+	fx.fakes.results["tv|Veronica Mars|"] = []map[string]any{result(1432, "Veronica Mars", "2004-09-22")}
+	identify := func(seasons ...int) *db.Item {
+		t.Helper()
+		id := fx.capture(t, nil)
+		fx.fakes.guess = tvGuess("Veronica Mars", seasons, false)
+		if err := fx.process(t); err != nil {
+			t.Fatal(err)
+		}
+		return fx.item(t, id)
+	}
+
+	first := identify(1)
+	if item := identify(2, 3); item.Status != db.StatusIdentified {
+		t.Errorf("other seasons: status %q (%s), want identified", item.Status, deref(item.ReviewReason))
+	}
+	want := "same titles and format as item #" + strconv.FormatInt(first.ID, 10)
+	if item := identify(1); item.Status != db.StatusNeedsReview || deref(item.ReviewReason) != want {
+		t.Errorf("the same season again: status %q reason %q; want needs_review, %q", item.Status, deref(item.ReviewReason), want)
+	}
+	if item := identify(3, 4); item.Status != db.StatusNeedsReview {
+		t.Errorf("overlapping seasons: status %q, want needs_review", item.Status)
+	}
+	if item := identify(); item.Status != db.StatusNeedsReview {
+		t.Errorf("seasons not stated: status %q, want needs_review", item.Status)
 	}
 }
 

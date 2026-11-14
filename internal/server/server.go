@@ -45,8 +45,10 @@ type Server struct {
 	tmdb *identify.TMDB
 	// offers backs the shop prices on the wishlist; nil when not configured.
 	offers offers.Source
-	// series caches the TMDB collections shown for a series.
-	series seriesCache
+	// series and shows cache the TMDB collections and TV series shown in
+	// the series and season lists.
+	series tmdbCache[*identify.Collection]
+	shows  tmdbCache[*identify.Show]
 }
 
 // OnPending registers fn to be called whenever items are waiting for identification.
@@ -98,6 +100,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/wants/{id}", s.handleDeleteWant)
 	mux.HandleFunc("GET /api/sync", s.handleSync)
 	mux.HandleFunc("GET /api/series/{id}", s.handleGetSeries)
+	mux.HandleFunc("GET /api/shows/{id}", s.handleGetShow)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not found")
 	})
