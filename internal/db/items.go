@@ -279,7 +279,8 @@ func (s *Store) queryTitles(ctx context.Context, clause string, args ...any) ([]
 		if collectionID != nil && collectionName != nil {
 			t.Series = &Series{ID: *collectionID, Name: SeriesName(*collectionName)}
 		}
-		t.Seasons = splitSeasons(seasons)
+		// Never nil, so the JSON has a list the UI can use as is.
+		t.Seasons = append([]int{}, splitSeasons(seasons)...)
 		titles = append(titles, t)
 	}
 	if err := rows.Err(); err != nil {

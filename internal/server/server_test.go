@@ -298,6 +298,11 @@ func TestManualCorrection(t *testing.T) {
 		item.Titles[1].Title != "Home Video" || item.Titles[1].TMDBID != nil {
 		t.Errorf("titles = %+v", item.Titles)
 	}
+	// A title without seasons sends an empty list, not null: the UI joins it.
+	raw, _ := io.ReadAll(get(t, itemURL).Body)
+	if !strings.Contains(string(raw), `"seasons":[]`) || strings.Contains(string(raw), `"seasons":null`) {
+		t.Errorf("item JSON = %s; want \"seasons\":[] for a movie", raw)
+	}
 
 	// Fields that are left out stay as they are.
 	item = decode[db.Item](t, patchItem(t, itemURL, `{"format":"UHD"}`))
