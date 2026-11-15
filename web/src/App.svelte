@@ -24,11 +24,18 @@
   }
 
   let route = $state<Route>(parse(location.hash));
+
+  const PAGE_NAMES = { capture: 'Capture', catalogue: 'Catalogue', library: 'Library', wishlist: 'Wishlist' };
+
+  $effect(() => {
+    const name = route.page === 'item' ? `Item #${route.id}` : PAGE_NAMES[route.page];
+    document.title = `${name} | Movie Catalog`;
+  });
 </script>
 
 <svelte:window onhashchange={() => (route = parse(location.hash))} />
 
-<nav>
+<nav aria-label="Primary">
   <a href="#/capture" aria-current={route.page === 'capture' ? 'page' : undefined}>Capture</a>
   <a href="#/items" aria-current={route.page === 'catalogue' || route.page === 'item' ? 'page' : undefined}
     >Catalogue</a

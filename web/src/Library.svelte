@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
     FORMATS,
     formatRank,
@@ -41,6 +41,9 @@
     readonly?: boolean;
   } = $props();
 
+  const uid = $props.id();
+  const headingId = `${uid}-title`;
+
   // One card per movie or series, however many discs it is on.
   interface Entry {
     key: string;
@@ -69,6 +72,8 @@
   type Sort = 'title' | 'year' | 'added';
 
   const REFRESH_MS = 4000;
+  /** Posters loaded at once, about the first screen; the rest wait until scrolled to. */
+  const EAGER_POSTERS = 12;
 
   let items = $state<LibraryItem[] | null>(null);
   let error = $state<string | null>(null);
@@ -77,6 +82,13 @@
   let kind = $state<Kind>('all');
   let sort = $state<Sort>('title');
   let searchInput = $state<HTMLInputElement>();
+  let panel = $state<HTMLElement>();
+  let heading = $state<HTMLHeadingElement>();
+
+  // Below this width the panel covers the grid (the media queries in the
+  // styles), so it is a modal dialog there and a plain aside beside the grid above.
+  const overlayQuery = matchMedia('(max-width: 59.99rem)');
+  let overlay = $state(overlayQuery.matches);
 
   function groupKey(t: Title): string {
     if (t.tmdb_id) return `${t.media_type}:${t.tmdb_id}`;
@@ -217,13 +229,39 @@
   onMount(() => {
     refresh();
     // The common visit is "do I own this?", so be ready to type. Skipped on
-    // touch screens, where it would pop up the keyboard.
-    if (matchMedia('(pointer: fine)').matches) searchInput?.focus();
-    if (readonly) return;
-    const timer = setInterval(() => {
-      if (error || items?.some((i) => i.status === 'captured')) refresh();
-    }, REFRESH_MS);
-    return () => clearInterval(timer);
+    // touch screens, where it would pop up the keyboard, and when the URL
+    // opens a title, whose panel takes the focus.
+    if (selected === null && matchMedia('(pointer: fine)').matches) searchInput?.focus();
+    const onresize = () => (overlay = overlayQuery.matches);
+    overlayQuery.addEventListener('change', onresize);
+    const timer = readonly
+      ? undefined
+      : setInterval(() => {
+          if (error || items?.some((i) => i.status === 'captured')) refresh();
+        }, REFRESH_MS);
+    return () => {
+      overlayQuery.removeEventListener('change', onresize);
+      clearInterval(timer);
+    };
+  });
+
+  // Focus follows the panel: to its heading when a title is selected, and back
+  // to that title's card when it closes. `current` is read untracked, because
+  // every refresh replaces it and would pull the focus back to the heading.
+  let opened: number | null = null;
+  $effect(() => {
+    const target = heading ?? panel;
+    if (selected !== null) {
+      opened = selected;
+      if (!target) return;
+      if (panel) panel.scrollTop = 0;
+      target.focus({ preventScroll: true });
+    } else if (opened !== null) {
+      const was = opened;
+      opened = null;
+      const key = untrack(() => entries.find((e) => e.ids.includes(was))?.key);
+      if (key) document.querySelector<HTMLElement>(`a[data-key="${CSS.escape(key)}"]`)?.focus();
+    }
   });
 
   function close() {
@@ -262,8 +300,9 @@
 <svelte:window {onkeydown} />
 
 <div class="layout" class:open={selected !== null}>
-  <main>
-    <div class="controls">
+  <main inert={overlay && selected !== null}>
+    {#if !readonly}<h1 class="visually-hidden">Library</h1>{/if}
+    <search class="controls">
       <input
         type="search"
         placeholder="Do I own…?  Type or paste a title  ( / )"
@@ -292,10 +331,10 @@
           <option value="added">Recently added</option>
         </select>
       </label>
-    </div>
+    </search>
 
     {#if error}
-      <p class="error">Could not load the library: {error}</p>
+      <p class="error" role="alert">Could not load the library: {error}</p>
     {/if}
 
     {#if items === null}
@@ -304,7 +343,7 @@
       <p class="empty">No identified titles yet.{#if !readonly} <a href="#/items">See the catalogue.</a>{/if}</p>
     {:else if visible.length === 0}
       {#if terms.length > 0}
-        <div class="verdict">
+        <div class="verdict" role="status">
           <strong>Not in your collection</strong>
           <span class="muted">
             Nothing matches “{query.trim()}”{format !== 'all' || kind !== 'all' ? ' with the current filters' : ''}.
@@ -315,18 +354,25 @@
       {/if}
     {:else}
       <ul class="grid">
-        {#each visible as entry (entry.key)}
+        {#each visible as entry, i (entry.key)}
           {@const poster = posterURL(entry.title.poster_path, 342)}
           <li>
             <a
               href="#/library/{entry.ids[0]}"
               class="card"
               class:selected={current === entry}
+              data-key={entry.key}
               aria-current={current === entry ? 'true' : undefined}
             >
               <span class="poster">
                 {#if poster}
-                  <img src={poster} alt="" loading="lazy" />
+                  <!-- The first rows are in view on load, and the very first is the largest paint. -->
+                  <img
+                    loading={i < EAGER_POSTERS ? undefined : 'lazy'}
+                    fetchpriority={i === 0 ? 'high' : undefined}
+                    src={poster}
+                    alt=""
+                  />
                 {:else}
                   <span class="noposter">{entry.title.title}</span>
                 {/if}
@@ -334,7 +380,10 @@
                   <span class="badge f-{formatRank(entry.best)}">{entry.best}</span>
                 {/if}
                 {#if entry.items.length > 1}
-                  <span class="copies" title="{entry.items.length} discs">×{entry.items.length}</span>
+                  <span class="copies" title="{entry.items.length} discs">
+                    <span aria-hidden="true">×{entry.items.length}</span>
+                    <span class="visually-hidden">{entry.items.length} discs</span>
+                  </span>
                 {/if}
               </span>
               <span class="name">{entry.title.title}</span>
@@ -360,15 +409,23 @@
   </main>
 
   {#if selected !== null}
-    <button class="backdrop" aria-label="Close" onclick={close}></button>
-    <aside aria-label="Title details">
+    <!-- For the pointer only; the ✕ is the close button for the keyboard and screen readers. -->
+    <button class="backdrop" tabindex="-1" aria-hidden="true" onclick={close}></button>
+    <aside
+      bind:this={panel}
+      tabindex="-1"
+      role={overlay ? 'dialog' : undefined}
+      aria-modal={overlay ? 'true' : undefined}
+      aria-labelledby={overlay && current ? headingId : undefined}
+      aria-label={overlay && current ? undefined : 'Title details'}
+    >
       <button class="close" aria-label="Close" onclick={close}>✕</button>
       {#if current}
         {@const t = current.title}
         {@const poster = posterURL(t.poster_path, 342)}
         {@const tmdb = tmdbURL(t)}
         {#if poster}<img class="big" src={poster} alt="{t.title} poster" />{/if}
-        <h2>{t.title}{#if t.year}&nbsp;<span class="muted">({t.year})</span>{/if}</h2>
+        <h2 id={headingId} tabindex="-1" bind:this={heading}>{t.title}{#if t.year}&nbsp;<span class="muted">({t.year})</span>{/if}</h2>
         {#if t.original_title && t.original_title !== t.title}
           <p class="muted">{t.original_title}</p>
         {/if}
@@ -452,7 +509,7 @@
     font: inherit;
     color: var(--text);
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
   }
@@ -479,7 +536,7 @@
   .group button[aria-pressed='true'] {
     color: var(--text);
     background: var(--surface);
-    border-color: var(--border);
+    border-color: var(--control-border);
   }
 
   .n {
@@ -642,7 +699,7 @@
   }
 
   a {
-    color: var(--accent);
+    color: var(--link);
   }
 
   aside {
@@ -653,6 +710,13 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+  }
+
+  /* Focused from script only, to give keyboard and screen reader users a
+     starting point in the panel; neither is a control, so no ring. */
+  aside:focus,
+  aside h2:focus {
+    outline: none;
   }
 
   aside h2 {
@@ -673,6 +737,8 @@
 
   .big {
     width: 60%;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
     align-self: center;
     border-radius: 0.5rem;
     margin-bottom: 0.5rem;
@@ -751,7 +817,7 @@
       position: sticky;
       top: 1rem;
       align-self: start;
-      max-height: calc(100vh - 2rem);
+      max-height: calc(100dvh - 2rem);
       overflow: auto;
     }
   }
@@ -775,6 +841,7 @@
       width: min(26rem, 100%);
       border-radius: 0;
       overflow: auto;
+      overscroll-behavior: contain;
     }
   }
 </style>

@@ -91,19 +91,22 @@
 </script>
 
 <div class="page">
+  <h1 class="visually-hidden">Wishlist</h1>
   <section class="add">
     <h2>Add a wish</h2>
-    <form onsubmit={search}>
-      <select bind:value={searchType} aria-label="Kind">
-        <option value="movie">Movie</option>
-        <option value="tv">Series</option>
-      </select>
-      <input bind:value={query} placeholder="Search TMDB" enterkeyhint="search" />
-      <button type="submit" disabled={searching || !query.trim()}>{searching ? 'Searching…' : 'Search'}</button>
-      {#if results}
-        <button type="button" class="link" onclick={() => (results = null)}>Close</button>
-      {/if}
-    </form>
+    <search>
+      <form onsubmit={search}>
+        <select bind:value={searchType} aria-label="Kind">
+          <option value="movie">Movie</option>
+          <option value="tv">Series</option>
+        </select>
+        <input bind:value={query} placeholder="Search TMDB" enterkeyhint="search" />
+        <button type="submit" disabled={searching || !query.trim()}>{searching ? 'Searching…' : 'Search'}</button>
+        {#if results}
+          <button type="button" class="link" onclick={() => (results = null)}>Close</button>
+        {/if}
+      </form>
+    </search>
 
     {#if results}
       {#if results.length === 0}
@@ -130,7 +133,7 @@
     {/if}
   </section>
 
-  {#if error}<p class="error">{error}</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
 
   {#if wishlist}
     {#if !wishlist.offers.configured}
@@ -193,7 +196,7 @@
     font: inherit;
     color: var(--text);
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
   }
@@ -213,7 +216,7 @@
   }
 
   .link {
-    color: var(--accent);
+    color: var(--link);
     background: none;
     border-color: transparent;
   }

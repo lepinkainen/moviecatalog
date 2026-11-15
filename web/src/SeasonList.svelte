@@ -212,8 +212,8 @@
   }
 
   .wish {
-    width: 1.3rem;
-    height: 1.3rem;
+    width: 1.5rem;
+    height: 1.5rem;
     padding: 0;
     border: 1px solid var(--muted);
     border-radius: 50%;
@@ -223,14 +223,12 @@
     font-size: 0.9rem;
     line-height: 1;
     cursor: pointer;
-    opacity: 0.6;
   }
 
   .wish:hover,
   .wish:focus-visible {
-    opacity: 1;
-    color: var(--accent);
-    border-color: var(--accent);
+    color: var(--link);
+    border-color: var(--link);
   }
 
   .wish:disabled {
@@ -238,7 +236,6 @@
   }
 
   .wish.failed {
-    opacity: 1;
     color: var(--danger);
     border-color: var(--danger);
   }

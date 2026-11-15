@@ -175,13 +175,20 @@
           class="primary"
           disabled={busy || dirty}
           onclick={approve}
-          title={dirty ? 'Save or undo your corrections first' : undefined}>Keep both</button
+          aria-describedby={dirty ? 'approve-hint' : undefined}>Keep both</button
         >
+        {#if dirty}<span class="hint" id="approve-hint">Save or undo your corrections first</span>{/if}
         <button class="danger" disabled={busy} onclick={remove}>Delete this one</button>
       </div>
     {:else}
       <div class="actions">
-        <button class="primary" disabled={busy || dirty} onclick={approve}>Looks right, approve</button>
+        <button
+          class="primary"
+          disabled={busy || dirty}
+          onclick={approve}
+          aria-describedby={dirty ? 'approve-hint' : undefined}>Looks right, approve</button
+        >
+        {#if dirty}<span class="hint" id="approve-hint">Save or undo your corrections first</span>{/if}
       </div>
     {/if}
   </section>
@@ -200,8 +207,8 @@
   </div>
 
   <div class="field">
-    <span class="name">Titles</span>
-    <ul class="titles">
+    <span class="name" id="titles-label">Titles</span>
+    <ul class="titles" aria-labelledby="titles-label">
       {#each titles as t, i (key(t))}
         <li>
           <span>
@@ -221,18 +228,20 @@
     </ul>
   </div>
 
-  <form class="search" onsubmit={search}>
-    <select bind:value={searchType} aria-label="Search for">
-      <option value="movie">Movie</option>
-      <option value="tv">Series</option>
-    </select>
-    <input type="search" placeholder="Search TMDB by title" aria-label="Title to search for" bind:value={query} />
-    <button type="submit" disabled={searching || !query.trim()}>{searching ? 'Searching…' : 'Search'}</button>
-    <!-- Independent of the search, so a title can be entered when TMDB is down or not configured. -->
-    <button type="button" disabled={!query.trim()} onclick={addTyped} title="Add the title exactly as typed, without TMDB">
-      Add as typed
-    </button>
-  </form>
+  <search>
+    <form class="search" onsubmit={search}>
+      <select bind:value={searchType} aria-label="Search for">
+        <option value="movie">Movie</option>
+        <option value="tv">Series</option>
+      </select>
+      <input type="search" placeholder="Search TMDB by title" aria-label="Title to search for" bind:value={query} />
+      <button type="submit" disabled={searching || !query.trim()}>{searching ? 'Searching…' : 'Search'}</button>
+      <!-- Independent of the search, so a title can be entered when TMDB is down or not configured. -->
+      <button type="button" disabled={!query.trim()} onclick={addTyped} title="Add the title exactly as typed, without TMDB">
+        Add as typed
+      </button>
+    </form>
+  </search>
 
   {#if results}
     <ul class="results">
@@ -264,7 +273,7 @@
     <input type="text" bind:value={notes} placeholder="For example: Steelbook, region 1" />
   </label>
 
-  {#if error}<p class="error">{error}</p>{/if}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
 
   <div class="actions">
     <button class="primary" disabled={busy || !dirty} onclick={save}>Save</button>
@@ -323,7 +332,7 @@
     font: inherit;
     color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.5rem 0.8rem;
   }
@@ -357,6 +366,12 @@
 
   .actions .danger {
     margin-left: auto;
+  }
+
+  .hint {
+    align-self: center;
+    color: var(--muted);
+    font-size: 0.9rem;
   }
 
   ul {

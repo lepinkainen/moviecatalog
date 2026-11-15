@@ -54,7 +54,8 @@
 </script>
 
 <main>
-  <div class="controls">
+  <h1 class="visually-hidden">Catalogue</h1>
+  <search class="controls">
     <input type="search" placeholder="Filter by title" aria-label="Filter by title" bind:value={query} />
     <div class="filters">
       {#each FILTERS as f (f.key)}
@@ -63,10 +64,10 @@
         </button>
       {/each}
     </div>
-  </div>
+  </search>
 
   {#if error}
-    <p class="error">Could not load the catalogue: {error}</p>
+    <p class="error" role="alert">Could not load the catalogue: {error}</p>
   {/if}
 
   {#if items === null}
@@ -124,7 +125,7 @@
     font: inherit;
     color: var(--text);
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.55rem 0.75rem;
   }
@@ -148,7 +149,7 @@
   button[aria-pressed='true'] {
     color: var(--text);
     background: var(--surface);
-    border-color: var(--border);
+    border-color: var(--control-border);
   }
 
   .n {

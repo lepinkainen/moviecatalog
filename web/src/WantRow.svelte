@@ -4,6 +4,9 @@
 
   let { want, onchanged }: { want: Want; onchanged: () => void } = $props();
 
+  const uid = $props.id();
+  const capErrorId = `${uid}-cap-error`;
+
   /** Offers shown before "show all". */
   const FIRST_OFFERS = 4;
 
@@ -25,6 +28,7 @@
   }
 
   const capCents = $derived(parseCap(cap));
+  const capUnreadable = $derived(Number.isNaN(capCents));
   const dirty = $derived(
     formats.join() !== want.formats.join() || capCents !== want.max_price_cents || notes.trim() !== want.notes,
   );
@@ -129,12 +133,14 @@
             bind:value={cap}
             inputmode="decimal"
             placeholder="any"
-            aria-invalid={Number.isNaN(capCents)}
+            aria-invalid={capUnreadable ? 'true' : undefined}
+            aria-describedby={capUnreadable ? capErrorId : undefined}
             size="6"
           />
           €
         </label>
-        <input class="notes" bind:value={notes} placeholder="Notes" />
+        {#if capUnreadable}<span class="invalid" id={capErrorId}>Enter a price like 12,50</span>{/if}
+        <input class="notes" bind:value={notes} placeholder="Notes" aria-label="Notes" />
         {#if dirty}
           <button class="primary" type="submit" disabled={busy || !valid}>Save</button>
         {/if}
@@ -143,7 +149,7 @@
         >
       </form>
     {/if}
-    {#if error}<p class="error">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
 
     {#if want.offers !== null && want.title.media_type === 'movie' && !want.collected_on}
       {#if offers.length === 0}
@@ -274,7 +280,7 @@
     font: inherit;
     color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.35rem 0.6rem;
   }
@@ -340,7 +346,7 @@
 
   .link {
     align-self: flex-start;
-    color: var(--accent);
+    color: var(--link);
     background: none;
     border: none;
     padding: 0;
@@ -348,6 +354,11 @@
 
   .error {
     margin: 0;
+    color: var(--danger);
+  }
+
+  .invalid {
+    font-size: 0.85rem;
     color: var(--danger);
   }
 
@@ -397,7 +408,7 @@
 
   .history {
     font-size: 0.85rem;
-    color: var(--accent);
+    color: var(--link);
     text-decoration: none;
     padding: 0.35rem 0.4rem;
   }
@@ -413,7 +424,7 @@
   }
 
   .deal .price {
-    color: var(--accent-2);
+    color: var(--accent-2-text);
   }
 
   .fmt {

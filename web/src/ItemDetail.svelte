@@ -69,7 +69,7 @@
   <a class="back" href="#/items">← Catalogue</a>
 
   {#if error}
-    <p class="error">Could not load item #{id}: {error}</p>
+    <p class="error" role="alert">Could not load item #{id}: {error}</p>
   {:else if !item}
     <p class="muted">Loading…</p>
   {:else}
@@ -268,7 +268,7 @@
   }
 
   dd a {
-    color: var(--accent);
+    color: var(--link);
   }
 
   details {

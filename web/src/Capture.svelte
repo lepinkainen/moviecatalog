@@ -178,7 +178,7 @@
       {#if total !== null}
         <strong>{total}</strong> in catalogue
       {:else if loadError}
-        <span class="error">Server unreachable: {loadError}</span>
+        <span class="error" role="alert">Server unreachable: {loadError}</span>
       {:else}
         &nbsp;
       {/if}
@@ -203,7 +203,7 @@
       {#each captures as capture (capture.key)}
         <li class={capture.state}>
           <img src={capture.thumb} alt="" />
-          <div class="status">
+          <div class="status" role="status">
             {#if capture.state === 'uploading'}
               Uploading…
             {:else if capture.state === 'removing'}
@@ -371,7 +371,7 @@
     font: inherit;
     color: var(--text);
     background: var(--bg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--control-border);
     border-radius: 0.5rem;
     padding: 0.6rem 0.9rem;
     cursor: pointer;
