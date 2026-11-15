@@ -92,6 +92,6 @@
   }
 
   footer a {
-    color: var(--accent);
+    color: var(--link);
   }
 </style>

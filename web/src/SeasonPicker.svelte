@@ -130,7 +130,7 @@
     padding: 0;
     border: none;
     background: none;
-    color: var(--accent);
+    color: var(--link);
     font: inherit;
     cursor: pointer;
   }

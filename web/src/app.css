@@ -5,10 +5,16 @@
   --text: #16181d;
   --muted: #5d6470;
   --border: #cfd4dc;
+  /* Borders of inputs, selects and buttons, which need 3:1 against the page. */
+  --control-border: #7f8693;
   --accent: #1f5fd1;
   --accent-2: #0d7a5f;
+  /* The accents as text: fills keep --accent and --accent-2, which are too dark to read on the dark theme. */
+  --link: #1f5fd1;
+  --accent-2-text: #0a6b53;
   --on-accent: #ffffff;
   --danger: #c0321f;
+  accent-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -18,8 +24,11 @@
     --text: #eceef2;
     --muted: #9aa1ad;
     --border: #3a3f49;
+    --control-border: #6f7785;
     --accent: #2f6fe4;
-    --accent-2: #128a6c;
+    --accent-2: #0f7f63;
+    --link: #8ab4ff;
+    --accent-2-text: #3fc59f;
     --danger: #ff7b68;
   }
 }
@@ -36,4 +45,16 @@ body {
   color: var(--text);
   font-family: system-ui, sans-serif;
   line-height: 1.4;
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
