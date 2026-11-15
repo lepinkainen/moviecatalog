@@ -12,12 +12,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/lepinkainen/moviecatalog/internal/db"
@@ -48,6 +52,8 @@ type Options struct {
 	Dir string
 	// Title is the page's heading.
 	Title string
+	// URL is the optional absolute public URL for link previews.
+	URL string
 	// TMDB fetches the series and season lists. Without it those panels are
 	// left out; series names still group and search.
 	TMDB TMDB
@@ -109,6 +115,12 @@ func Run(ctx context.Context, store *db.Store, assets fs.FS, opts Options, log *
 	if _, err := fs.Stat(assets, pageFile); err != nil {
 		return Summary{}, errors.New("the export page is not built into this binary; run `task build` (or `task web-build` before `go build`)")
 	}
+	if opts.URL != "" {
+		u, err := url.Parse(opts.URL)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.Fragment != "" || u.User != nil {
+			return Summary{}, errors.New("export URL must be an absolute HTTP(S) URL without credentials or a fragment")
+		}
+	}
 	data, err := collect(ctx, store, opts, log)
 	if err != nil {
 		return Summary{}, err
@@ -117,6 +129,13 @@ func Run(ctx context.Context, store *db.Store, assets fs.FS, opts Options, log *
 		return Summary{}, err
 	}
 	if err := copyAssets(assets, opts.Dir); err != nil {
+		return Summary{}, err
+	}
+	page, err := os.ReadFile(filepath.Join(opts.Dir, indexFile))
+	if err != nil {
+		return Summary{}, err
+	}
+	if err := os.WriteFile(filepath.Join(opts.Dir, indexFile), previewHTML(page, data, opts.URL), 0o644); err != nil {
 		return Summary{}, err
 	}
 	body, err := json.Marshal(data)
@@ -260,4 +279,58 @@ func copyAssets(assets fs.FS, dir string) error {
 		}
 		return os.WriteFile(target, body, 0o644)
 	})
+}
+
+// previewHTML writes metadata into the initial HTML so crawlers need no JavaScript.
+func previewHTML(page []byte, data *Data, publicURL string) []byte {
+	title := html.EscapeString(data.Title)
+	description := fmt.Sprintf("Browse a collection of %d discs, with movies and TV series on DVD, Blu-ray and UHD.", len(data.Items))
+	var tags strings.Builder
+	fmt.Fprintf(&tags, "<title>%s</title>\n", title)
+	meta := func(attribute, key, value string) {
+		fmt.Fprintf(&tags, "<meta %s=%q content=\"%s\" />\n", attribute, key, html.EscapeString(value))
+	}
+	meta("name", "description", description)
+	meta("property", "og:type", "website")
+	meta("property", "og:title", data.Title)
+	meta("property", "og:description", description)
+	if publicURL != "" {
+		meta("property", "og:url", publicURL)
+	}
+	// Pick once per export; the written HTML keeps that poster until the next export.
+	poster := randomPoster(data, rand.IntN)
+	image, alt := "", ""
+	if poster != nil {
+		image = "https://image.tmdb.org/t/p/w500" + *poster.PosterPath
+		alt = poster.Title + " poster"
+	}
+	if image != "" {
+		meta("property", "og:image", image)
+		meta("property", "og:image:alt", alt)
+	}
+	meta("name", "twitter:card", "summary")
+	return []byte(strings.Replace(string(page), "<title>Movie collection</title>", tags.String(), 1))
+}
+
+// randomPoster samples unique movie posters so multiple editions do not bias the choice.
+func randomPoster(data *Data, intN func(int) int) *Title {
+	posters := []Title{}
+	seen := map[string]bool{}
+	for _, item := range data.Items {
+		for _, title := range item.Titles {
+			if title.MediaType != db.MediaMovie || title.PosterPath == nil {
+				continue
+			}
+			path := *title.PosterPath
+			if !strings.HasPrefix(path, "/") || path == "/" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			posters = append(posters, title)
+		}
+	}
+	if len(posters) == 0 {
+		return nil
+	}
+	return &posters[intN(len(posters))]
 }

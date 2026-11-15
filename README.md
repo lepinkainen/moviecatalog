@@ -44,6 +44,14 @@ task export -- --output=site/ --title="My discs"
 
 This writes identified discs only, with no barcodes, notes, photos or wishlist.
 
+The exported HTML includes chat link preview metadata: the collection title,
+disc count and a random movie poster from TMDB. A new poster is picked on each export (repeats are possible). No JavaScript is needed to read it.
+Set `PUBLISH_URL=https://your-public-host/movies/` in `op.env` to include the
+canonical public URL when running `task publish`. Export also accepts
+`--url=https://your-public-host/movies/`. Metadata is still generated without
+this optional setting. The page and poster must be publicly accessible to chat
+crawlers; chats may cache previews after publishing.
+
 ### Backup
 
 Both write `backups/moviecatalog-YYYYMMDD-HHMMSS.zip` with a consistent

@@ -34,7 +34,7 @@ tasks:
       - op run --env-file=op.env -- go run . export {{.CLI_ARGS}}
 
   publish:
-    desc: Export the site with series lists and upload it to PUBLISH_HOST (both from op.env); export flags go after --
+    desc: Export with link previews and series lists, upload to PUBLISH_HOST (optional PUBLISH_URL in op.env); flags go after --
     deps: [web-build]
     cmds:
       - |

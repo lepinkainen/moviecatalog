@@ -111,6 +111,7 @@ Flags:
 	}
 	out := flags.String("output", "site", "directory to write the site into")
 	title := flags.String("title", "Movie collection", "heading and page title")
+	publicURL := flags.String("url", os.Getenv("PUBLISH_URL"), "public site URL for link previews (defaults to PUBLISH_URL)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -134,7 +135,7 @@ Flags:
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	opts := export.Options{Dir: *out, Title: *title, Now: time.Now()}
+	opts := export.Options{Dir: *out, Title: *title, URL: *publicURL, Now: time.Now()}
 	if key := os.Getenv("TMDB_API_KEY"); key != "" {
 		opts.TMDB = &identify.TMDB{APIKey: key, HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}

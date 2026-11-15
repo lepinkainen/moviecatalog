@@ -17,7 +17,7 @@ import (
 )
 
 var testAssets = fstest.MapFS{
-	"export.html":         {Data: []byte("<!doctype html><title>page</title>")},
+	"export.html":         {Data: []byte("<!doctype html><title>Movie collection</title>")},
 	"assets/export-1.js":  {Data: []byte("js")},
 	"assets/export-1.css": {Data: []byte("css")},
 	".gitkeep":            {},
@@ -164,6 +164,13 @@ func TestRun(t *testing.T) {
 		Options{Dir: dir, Title: "My discs", TMDB: indy, Now: now}, quiet)
 	if err != nil {
 		t.Fatal(err)
+	}
+	page, err := os.ReadFile(filepath.Join(dir, indexFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), `property="og:title" content="My discs"`) {
+		t.Fatal("export did not write preview metadata")
 	}
 	if sum != (Summary{Items: 4, Titles: 3, Series: 1, Shows: 1}) {
 		t.Errorf("summary = %+v", sum)
@@ -317,5 +324,64 @@ func TestRunNeedsBuiltPage(t *testing.T) {
 	_, err := Run(context.Background(), store, fstest.MapFS{".gitkeep": {}}, Options{Dir: t.TempDir(), Now: time.Now()}, quiet)
 	if err == nil || !strings.Contains(err.Error(), "not built") {
 		t.Errorf("err = %v, want a not-built error", err)
+	}
+}
+
+func TestPreviewHTML(t *testing.T) {
+	poster := "/poster.jpg"
+	data := &Data{Title: "My <discs> & movies", Items: []Item{{Titles: []Title{{Title: "A movie", MediaType: db.MediaMovie, PosterPath: &poster}}}}}
+	page := previewHTML([]byte("<head><title>Movie collection</title></head>"), data, "https://example.com/movies/?a=1&b=2")
+	for _, want := range []string{
+		"<title>My &lt;discs&gt; &amp; movies</title>",
+		`property="og:title" content="My &lt;discs&gt; &amp; movies"`,
+		`property="og:url" content="https://example.com/movies/?a=1&amp;b=2"`,
+		`property="og:image" content="https://image.tmdb.org/t/p/w500/poster.jpg"`,
+		"collection of 1 discs",
+	} {
+		if !strings.Contains(string(page), want) {
+			t.Errorf("missing %q in %s", want, page)
+		}
+	}
+	empty := string(previewHTML([]byte("<title>Movie collection</title>"), &Data{Title: "Empty"}, ""))
+	if strings.Contains(empty, "og:image") || strings.Contains(empty, "og:url") {
+		t.Fatal("empty collection has image or URL metadata")
+	}
+	if !strings.Contains(empty, "collection of 0 discs") {
+		t.Fatal("missing empty collection description")
+	}
+}
+
+func TestInvalidPreviewURL(t *testing.T) {
+	for _, u := range []string{"relative/path", "javascript:alert(1)", "https://example.com/#movie", "https://user:pass@example.com"} {
+		_, err := Run(context.Background(), nil, testAssets, Options{URL: u}, quiet)
+		if err == nil {
+			t.Errorf("accepted %q", u)
+		}
+	}
+}
+
+func TestRandomPoster(t *testing.T) {
+	a, b, tv, invalid := "/a.jpg", "/b.jpg", "/tv.jpg", "/"
+	data := &Data{Items: []Item{{Titles: []Title{
+		{Title: "A", MediaType: db.MediaMovie, PosterPath: &a},
+		{Title: "A duplicate", MediaType: db.MediaMovie, PosterPath: &a},
+		{Title: "TV", MediaType: db.MediaTV, PosterPath: &tv},
+		{Title: "Missing", MediaType: db.MediaMovie},
+		{Title: "Invalid", MediaType: db.MediaMovie, PosterPath: &invalid},
+		{Title: "B", MediaType: db.MediaMovie, PosterPath: &b},
+	}}}}
+	for index, want := range []string{"A", "B"} {
+		got := randomPoster(data, func(n int) int {
+			if n != 2 {
+				t.Fatalf("candidate count = %d, want 2", n)
+			}
+			return index
+		})
+		if got == nil || got.Title != want {
+			t.Fatalf("choice %d = %v, want %s", index, got, want)
+		}
+	}
+	if got := randomPoster(&Data{}, func(int) int { t.Fatal("random called without posters"); return 0 }); got != nil {
+		t.Fatal("empty collection returned a poster")
 	}
 }
