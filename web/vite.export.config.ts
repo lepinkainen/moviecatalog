@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [svelte()],
   // Relative asset paths, so the site also works from a subdirectory of the host.
   base: './',
+  publicDir: false,
   build: {
     outDir: '../internal/webui/export',
     emptyOutDir: true,
