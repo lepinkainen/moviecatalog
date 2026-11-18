@@ -62,6 +62,21 @@
   const owned = $derived(released.filter((p) => p.copies.length > 0).length);
 </script>
 
+{#snippet wishButton(part: SeriesPart, upgrade: boolean)}
+  <button
+    class="wish"
+    class:failed={failed[part.tmdb_id]}
+    title={failed[part.tmdb_id]
+      ? `Could not add to the wishlist: ${failed[part.tmdb_id]}`
+      : upgrade
+        ? 'Add a Blu-ray/UHD upgrade to the wishlist'
+        : 'Add to wishlist'}
+    aria-label="Add {upgrade ? 'an upgrade of ' : ''}{part.title} to the wishlist"
+    disabled={adding.includes(part.tmdb_id)}
+    onclick={() => wish(part)}>+</button
+  >
+{/snippet}
+
 {#if !missing}
 <section class="series">
   {#if error}
@@ -90,22 +105,20 @@
           <span class="state">
             {#if best}
               {best.format ?? 'owned'}{#if part.copies.length > 1}<span class="muted"> ×{part.copies.length}</span>{/if}
+              {#if best.format === 'DVD' && !readonly}
+                {#if part.wanted}
+                  <a class="muted" href="#/wishlist">upgrade on wishlist</a>
+                {:else}
+                  {@render wishButton(part, true)}
+                {/if}
+              {/if}
             {:else if !part.released}
               <span class="muted">upcoming</span>
             {:else if part.wanted && !readonly}
               <a class="muted" href="#/wishlist">on wishlist</a>
             {:else}
               <span class="muted">not owned</span>
-              {#if !readonly}<button
-                class="wish"
-                class:failed={failed[part.tmdb_id]}
-                title={failed[part.tmdb_id]
-                  ? `Could not add to the wishlist: ${failed[part.tmdb_id]}`
-                  : 'Add to wishlist'}
-                aria-label="Add {part.title} to the wishlist"
-                disabled={adding.includes(part.tmdb_id)}
-                onclick={() => wish(part)}>+</button
-              >{/if}
+              {#if !readonly}{@render wishButton(part, false)}{/if}
             {/if}
           </span>
         </li>

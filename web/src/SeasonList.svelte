@@ -68,6 +68,21 @@
   const ended = $derived(show?.status === 'Ended' || show?.status === 'Canceled');
 </script>
 
+{#snippet wishButton(season: ShowSeason, upgrade: boolean)}
+  <button
+    class="wish"
+    class:failed={failed[season.number]}
+    title={failed[season.number]
+      ? `Could not add to the wishlist: ${failed[season.number]}`
+      : upgrade
+        ? 'Add a Blu-ray/UHD upgrade to the wishlist'
+        : 'Add to wishlist'}
+    aria-label="Add {upgrade ? 'an upgrade of ' : ''}{season.name} of {show?.name} to the wishlist"
+    disabled={adding.includes(season.number)}
+    onclick={() => show && wish(show, season)}>+</button
+  >
+{/snippet}
+
 {#if !missing}
 <section class="seasons">
   {#if error}
@@ -95,22 +110,20 @@
           <span class="state">
             {#if best}
               {best.format ?? 'owned'}{#if season.copies.length > 1}<span class="muted"> ×{season.copies.length}</span>{/if}
+              {#if best.format === 'DVD' && !readonly}
+                {#if season.wanted}
+                  <a class="muted" href="#/wishlist">upgrade on wishlist</a>
+                {:else}
+                  {@render wishButton(season, true)}
+                {/if}
+              {/if}
             {:else if !season.released}
               <span class="muted">upcoming</span>
             {:else if season.wanted && !readonly}
               <a class="muted" href="#/wishlist">on wishlist</a>
             {:else}
               <span class="muted">not owned</span>
-              {#if !readonly}<button
-                class="wish"
-                class:failed={failed[season.number]}
-                title={failed[season.number]
-                  ? `Could not add to the wishlist: ${failed[season.number]}`
-                  : 'Add to wishlist'}
-                aria-label="Add {season.name} of {show.name} to the wishlist"
-                disabled={adding.includes(season.number)}
-                onclick={() => show && wish(show, season)}>+</button
-              >{/if}
+              {#if !readonly}{@render wishButton(season, false)}{/if}
             {/if}
           </span>
         </li>

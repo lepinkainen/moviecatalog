@@ -255,7 +255,9 @@ wishlist, not browsing.
 - **Notes**: free text.
 - **Collected on**: the day a captured disc fulfilled the wish (see below).
 - Wishes are added from a TMDB search on the wishlist page, or with the + on a
-  missing movie in a series list (library panel, item detail). When the title is
+  missing movie in a series list (library panel, item detail). A movie or
+  season owned only on DVD gets the + too, as an upgrade to Blu-ray/UHD; one
+  owned on Blu-ray gets none, since a UHD upgrade is rare enough to add by hand. When the title is
   already owned, the wishlist page says in which format(s), so it's clear whether
   the wish is an upgrade or a mistake.
 - **Buying the disc fulfils the wish.** When a captured disc is identified as a
